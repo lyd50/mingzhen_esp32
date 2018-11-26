@@ -1,0 +1,23 @@
+while (Serial2.available() > 0 && parse_ready == false) //读取串口
+    {
+        buffer[buffer_index] = Serial2.read();
+
+        if (buffer[buffer_index] == 0xff) //三个0xff结尾
+        {
+            terminator++;
+        }
+
+        if (terminator == 3) //接收到3个结束符
+        {
+            Serial.print("进入一次");
+            serial_print(buffer, buffer_index + 1);
+            //serial_print(buffer, buffer_index + 1);
+            buffer_index = 0;   //读完后赋值零
+              terminator = 0;  
+            parse_ready = true; //需要解析命令
+             //复位
+           return;
+            //while (Serial.read() >= 0) {}//清空串口缓存
+        }
+        buffer_index++;
+    }
