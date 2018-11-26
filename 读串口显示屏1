@@ -1,0 +1,68 @@
+ while (Serial2.available() > 0&& (parse_ready)==false) //读取串口
+    {
+        buffer[buffer_index] = Serial2.read();
+       /* if(buffer_index==0)   为了避免第一个字节是0xff，但很容易死机，不知为什么。2018.11.26晚
+        {
+          while (buffer[0] == 0xff)
+            {
+            buffer[0] == Serial2.read();
+            }
+        }*/
+       
+        if (buffer[buffer_index] == 0xff) //三个0xff结尾
+        {  
+                        
+            buffer[buffer_index + 1] = Serial2.read(); //读第二个结束符
+            if (buffer[buffer_index + 1] == 0xff)
+            {
+                buffer[buffer_index + 2] = Serial2.read(); //读第三个结束符
+                if (buffer[buffer_index + 2] == 0xff)
+                {
+                    Serial.print("接收一次完整数据");
+                    serial_print(buffer, buffer_index + 3);
+                    //serial_print(buffer, buffer_index + 1);
+                    buffer_index = 0;   //读完后赋值零
+                    parse_ready = true; //需要解析命令
+
+                    return;//提高串口处理速度，直接返回，效果很好
+                }
+            }
+        }
+
+        buffer_index++;
+    }
+  
+
+/*
+ while (Serial2.available() > 0 && parse_ready == false) //读取串口
+    {
+        buffer[buffer_index] = Serial2.read();
+
+        if (buffer[buffer_index] == 0xff) //三个0xff结尾
+        {
+            terminator++;
+        }
+
+        if (terminator == 3) //接收到3个结束符
+        {
+            Serial.print("进入一次");
+            serial_print(buffer, buffer_index + 1);
+            //serial_print(buffer, buffer_index + 1);
+            buffer_index = 0;   //读完后赋值零
+              terminator = 0;  
+            parse_ready = true; //需要解析数据
+             //复位
+           return;
+            //while (Serial.read() >= 0) {}//清空串口缓存
+        }
+        buffer_index++;
+    }
+*/
+
+  
+  if (parse_ready == true) //
+    {
+        serial_command_parse();//获取页号和数据
+
+        parse_ready = false;
+    }
