@@ -1,0 +1,1111 @@
+
+
+//#include <Preferences.h>
+
+#include <stdlib.h>
+//#include <OneWire.h>
+//#include <DallasTemperature.h>
+#include <Arduino.h>
+#include <HardwareSerial.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WebServer.h>
+#include <ESPmDNS.h>
+#include <Update.h>
+#include "EEPROM.h"
+/*------------------------------------------------------ OTA------------------------------------------------ */
+const char *host = "esp32";
+const char *ssid = "lydwifi";
+const char *password = "19711128";
+/*------------------------------------------------------ OTA------------------------------------------------ */
+WebServer server(80);
+
+/* * Login page */
+
+const char *loginIndex =
+    "<form name='loginForm'>"
+    "<table width='20%' bgcolor='A09F9F' align='center'>"
+    "<tr>"
+    "<td colspan=2>"
+    "<center><font size=4><b>ESP32 Login Page</b></font></center>"
+    "<br>"
+    "</td>"
+    "<br>"
+    "<br>"
+    "</tr>"
+    "<td>Username:</td>"
+    "<td><input type='text' size=25 name='userid'><br></td>"
+    "</tr>"
+    "<br>"
+    "<br>"
+    "<tr>"
+    "<td>Password:</td>"
+    "<td><input type='Password' size=25 name='pwd'><br></td>"
+    "<br>"
+    "<br>"
+    "</tr>"
+    "<tr>"
+    "<td><input type='submit' onclick='check(this.form)' value='Login'></td>"
+    "</tr>"
+    "</table>"
+    "</form>"
+    "<script>"
+    "function check(form)"
+    "{"
+    "if(form.userid.value=='admin' && form.pwd.value=='admin')"
+    "{"
+    "window.open('/serverIndex')"
+    "}"
+    "else"
+    "{"
+    " alert('Error Password or Username')/*displays error message*/"
+    "}"
+    "}"
+    "</script>";
+
+/* * Server Index Page */
+
+const char *serverIndex =
+    "<script src='https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js'></script>"
+    "<form method='POST' action='#' enctype='multipart/form-data' id='upload_form'>"
+    "<input type='file' name='update'>"
+    "<input type='submit' value='Update'>"
+    "</form>"
+    "<div id='prg'>progress: 0%</div>"
+    "<script>"
+    "$('form').submit(function(e){"
+    "e.preventDefault();"
+    "var form = $('#upload_form')[0];"
+    "var data = new FormData(form);"
+    " $.ajax({"
+    "url: '/update',"
+    "type: 'POST',"
+    "data: data,"
+    "contentType: false,"
+    "processData:false,"
+    "xhr: function() {"
+    "var xhr = new window.XMLHttpRequest();"
+    "xhr.upload.addEventListener('progress', function(evt) {"
+    "if (evt.lengthComputable) {"
+    "var per = evt.loaded / evt.total;"
+    "$('#prg').html('progress: ' + Math.round(per*100) + '%');"
+    "}"
+    "}, false);"
+    "return xhr;"
+    "},"
+    "success:function(d, s) {"
+    "console.log('success!')"
+    "},"
+    "error: function (a, b, c) {"
+    "}"
+    "});"
+    "});"
+    "</script>";
+
+/*--------------------------------串口-------------------------------------------*/
+byte buffer[150]; //接收串口缓存
+unsigned int buffer_index = 0;
+byte brightness = 30; //亮度默认50
+bool set_once = true; //设置时赋值一次
+byte page = 0;        //默认0号页面
+byte pre_page = 50;   //为了比对现在页面，看是否改变
+String pre_kongjian, pre_text;
+//byte ff_starter = 0;
+byte terminator = 0; //命令结束指示
+bool parse_ready = false;
+bool eeprom_write = false;
+String order_sended = ""; //最近一次发送的命令
+//unsigned long main_1 = 0;
+//unsigned long page_transfer = 0;
+//unsigned long tips = 0;
+//unsigned long loop_refresh;
+
+/*--------------------------------EEPROM-------------------------------------------*/
+//0-49放超滤有关。 50-99放制水有关  100-149放洗膜有关 150开始其他
+#define EEPROM_SIZE 200
+
+/*--------------------------------制水-------------------------------------------*/
+byte zhishuishijian_set = 50;     //单次制水最长50分钟，255以内
+unsigned long zhishuizongshijian; //
+byte zhishui_zong_add = 5;
+byte zhishui_dan_add = 30;
+
+bool yinyong_zhishui = false, shchan_zhishui = false;
+byte shuimandengdaishijian_set = 6; //净水电磁阀关闭后等待水满时间 6分钟，
+bool feishuiguoshao = false;        //废水过少故障停机
+byte zhishui_maichong_biaozhun = 30;
+bool alarm1 = false;    /*净水关闭输出后制水10分钟不满，故障停机*/
+byte chaoshi_cishu = 0; /*连续2次超时制水，报警*/
+byte feishuiguoshao_times = 0;
+unsigned long zhishui_starttime = 0, zhishui_endtime = 0;
+/*--------------------------------洗膜-------------------------------------------*/
+byte jingshuiximo_shichang = 6; //洗膜用时6分钟,单位分钟
+bool xuyao_ximo = false;
+byte moci_ximo_maichong_biaozhun = 9, ximo_shuiliu_jiance_cishu = 10;
+//byte dcf_chxi_shichang = 40; //冲洗电磁阀冲洗秒数
+unsigned long ximo_begin = 0;
+/*--------------------------------超滤-------------------------------------------*/
+byte chaolv_chongxi_maichong_dixian = 20;
+byte loushui_maich_biaozhun = 10;
+//unsigned int chaolvchongxi_zongcishu = 0; /*超滤冲洗次数*/
+unsigned long accumulative = 0; /*冲洗累积时间*/
+byte chxi_cishu = 2;            //单回超滤冲洗次数
+byte leiji_biaozhun = 30;
+bool chaolv_chxi = false, loushui_bool = false; //是否需要冲洗超滤
+unsigned long chaolvchongxi_zongcishu = 0;
+/*--------------------------------缺水-------------------------------------------*/
+bool queshui_once = false;
+unsigned long queshui_begin = 0;
+
+/*--------------------------------调试-------------------------------------------*/
+bool tiaoshikg = true;
+/*--------------------------------水流传感器-------------------------------------------*/
+volatile long count = 0; //水流传感器开关次数
+
+unsigned long begintime = 0, endtime, begintime2 = 0, endtime2;
+unsigned long begintime_baohu = 0, endtime_baohu = 0;
+
+char str[10];
+/*--------------------------------保护-------------------------------------------*/
+unsigned long jingshui_chaoya_begin = 0;
+/*--------------------------------输入输出设定-------------------------------------------*/
+int diyakg = 23, ximo_gaoyakg = 22, yinyong_gaoyakg = 21, shengchan_gaoyakg = 19, jingshui_chaoya = 18, shuiliu_chuanganqi = 14;
+int chaolv = 27, jingshui = 26, zongjin = 25, gaoyabeng = 33, youxian = 32, jiare = 35;
+
+const int maxAllowedWrites = 80;
+
+void closeall() /*全部输出关闭*/
+{
+    digitalWrite(chaolv, LOW);
+    //digitalWrite(rushui, LOW);
+    //digitalWrite(chongxi, LOW);
+    digitalWrite(jingshui, LOW);
+    digitalWrite(gaoyabeng, LOW);
+    digitalWrite(zongjin, LOW);
+    digitalWrite(youxian, LOW);
+    //digitalWrite(jiare, LOW);
+}
+void count_function()
+{
+    count++;
+    delay(3);
+}
+void detect(unsigned long yongshi) /*持续时间,单位毫秒*/
+{
+    count = 0; /*计数次数归零,重新计数*/
+    unsigned long begintime2 = millis();
+    unsigned long endtime2;
+    attachInterrupt(digitalPinToInterrupt(shuiliu_chuanganqi), count_function, FALLING);
+    do
+    {
+        endtime2 = millis();
+    } while (endtime2 - begintime2 < yongshi);
+
+    detachInterrupt(digitalPinToInterrupt(shuiliu_chuanganqi));
+}
+
+void decide_chaolv_chxi(unsigned long long1)
+{
+    //zhishuizongshijian = zhishuizongshijian + long1;
+    //EEPROM.writeLong(3, zhishuizongshijian);
+
+    accumulative = accumulative + long1;
+
+    if (accumulative > leiji_biaozhun * 60000)
+    {
+        chaolv_chxi = true;
+        accumulative = 0;
+    }
+}
+
+void xianshiping_sendorder1(String kongjian, int value) //控件显示数值
+{
+
+    Serial2.print(kongjian + ".val=" + value + "");
+    for (int i = 0; i < 3;)
+    {
+        Serial2.write(0xff);
+        i++;
+    };
+}
+
+void xianshiping_sendorder2(String kongjian, String text) //控件显示文本
+{
+    if (page == 0)
+    {
+        Serial2.print(kongjian + ".txt=\"" + text + "\"");
+        for (int i = 0; i < 3;)
+        {
+            Serial2.write(0xff);
+            i++;
+        }
+        delay(1500);
+    }
+}
+
+void tiaoshi(String pingmuxianshi)
+{
+
+    if (tiaoshikg == true)
+    {
+
+        Serial.println(pingmuxianshi);
+    }
+}
+
+void serial_command_parse() //解析串口命令
+{                           /*------------------------------指示命令错误信息-------------------------------*/
+    if (buffer[0] == 0x0)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0x00");
+    }
+    if (buffer[0] == 0x02)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0x02");
+    }
+    if (buffer[0] == 0x03)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0x03");
+    }
+    if (buffer[0] == 0x04)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0x04");
+    }
+    if (buffer[0] == 0x05)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0x05");
+    }
+    if (buffer[0] == 0x11)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0x11");
+    }
+    if (buffer[0] == 0x12)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0x12");
+    }
+    //1A变量名称或控件属性无效,数值超出范围也报此故障
+    if (buffer[0] == 0x1A)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0x1A");
+    }
+    if (buffer[0] == 0x1B)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0X1B");
+    }
+    if (buffer[0] == 0x1C)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0X1C");
+    }
+    if (buffer[0] == 0x1D)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0X1D");
+    }
+    if (buffer[0] == 0x1E)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0X1E");
+    }
+    if (buffer[0] == 0x1F)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0X1F");
+    }
+    if (buffer[0] == 0x23)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0X23");
+    }
+    if (buffer[0] == 0x24)
+    {
+        Serial.print(order_sended);
+        Serial.println(": 0X24");
+    }
+
+    /*------------------------------得出页面号-------------------------------*/
+    if (buffer[0] == 0x66) //
+    {
+        page = buffer[1]; //
+        tiaoshi("页号" + (String)page);
+
+        Serial.print("page:");
+        Serial.println(page);
+        if (pre_page != page)
+        {
+            set_once = true; //因为页号不同，允许传送数据
+
+            pre_page = page;
+        }
+    }
+    /*------------------------------3号超滤设置页面:-------------------------------*/
+    if (page == 3)
+    {
+
+        if (buffer[0] == 0x90)
+        {
+            chaolv_chongxi_maichong_dixian = buffer[1];
+            EEPROM.writeByte(0, chaolv_chongxi_maichong_dixian); //0
+            eeprom_write = true;
+        }
+
+        if (buffer[0] == 0x91)
+        {
+            loushui_maich_biaozhun = buffer[1];
+            EEPROM.writeByte(2, loushui_maich_biaozhun); //
+            eeprom_write = true;
+        }
+
+        if (buffer[0] == 0x92)
+        {
+            chxi_cishu = buffer[1];
+            EEPROM.writeByte(4, chxi_cishu); //
+            eeprom_write = true;
+        }
+
+        if (buffer[0] == 0x93)
+        {
+            leiji_biaozhun = buffer[1]; //
+            EEPROM.writeByte(6, leiji_biaozhun);
+            eeprom_write = true;
+        }
+    }
+    /*------------------------------4号页面:设置制水有关-------------------------------*/
+    if (page == 4)
+    {
+        if (buffer[0] == 0x90)
+        {
+            zhishuishijian_set = buffer[1];           //
+            EEPROM.writeByte(50, zhishuishijian_set); //50
+
+            tiaoshi("单次制水限时:" + (String)zhishuishijian_set);
+            eeprom_write = true;
+        }
+
+        if (buffer[0] == 0x91)
+        {
+            zhishui_maichong_biaozhun = buffer[1];
+            EEPROM.writeByte(52, zhishui_maichong_biaozhun); //52字节
+            eeprom_write = true;
+        }
+
+        if (buffer[0] == 0x92)
+        {
+            chaoshi_cishu = buffer[1];
+            EEPROM.writeByte(54, chaoshi_cishu); //到第54字节
+            eeprom_write = true;
+        }
+        if (buffer[0] == 0x93)
+        {
+            shuimandengdaishijian_set = buffer[1]; //到43字节
+            EEPROM.writeByte(56, shuimandengdaishijian_set);
+            eeprom_write = true;
+        }
+    }
+    /*------------------------------5号页面:洗膜设置-------------------------------*/
+    if (page == 5)
+    {
+        if (buffer[0] == 0x90) //
+        {
+            jingshuiximo_shichang = buffer[1];
+            EEPROM.writeByte(100, jingshuiximo_shichang); //
+            eeprom_write = true;
+        }
+
+        if (buffer[0] == 0x91) //
+        {
+            ximo_shuiliu_jiance_cishu = buffer[1];
+            EEPROM.writeByte(102, ximo_shuiliu_jiance_cishu); //
+            eeprom_write = true;
+        }
+        if (buffer[0] == 0x92) //
+        {
+            moci_ximo_maichong_biaozhun = buffer[1];
+            EEPROM.writeByte(104, moci_ximo_maichong_biaozhun); //到第51字节
+            eeprom_write = true;
+        }
+    }
+    /*------------------------------13号页面:wifi设置-------------------------------*/
+
+    /*------------------------------7号亮度页面处理-------------------------------*/
+    if (page == 7)
+    {
+        if (buffer[0] == 0x72)
+        {
+            //Serial.println("huo qu liang du");
+            brightness = buffer[1];
+            // p.putChar("brightness", brightness);
+        }
+    }
+    /*------------------------------9号页面:温度计序号-------------------------------*/
+    if (eeprom_write == true)
+    {
+        tiaoshi("存储一次");
+        if (EEPROM.commit())
+        {
+            tiaoshi("成功写入");
+            eeprom_write = false;
+        }
+        else
+        {
+            tiaoshi("写入失败");
+        }
+    }
+}
+void send_order() //发送命令，回传显示屏设置项的已设值
+{
+    /*------------------------------3号页面:超滤设置-------------------------------*/
+    if (page == 3)
+    {
+
+        if (set_once == true)
+        {
+
+            xianshiping_sendorder1("n0", chaolv_chongxi_maichong_dixian);
+            xianshiping_sendorder1("n1", loushui_maich_biaozhun);
+            xianshiping_sendorder1("n2", chxi_cishu);
+            xianshiping_sendorder1("n3", leiji_biaozhun);
+            set_once = false;
+        }
+    }
+    /*------------------------------4号页面:制水设置-------------------------------*/
+    if (page == 4)
+    {
+        if (set_once == true)
+        {
+            xianshiping_sendorder1("n0", zhishuishijian_set);
+            xianshiping_sendorder1("n1", zhishui_maichong_biaozhun);
+            xianshiping_sendorder1("n2", chaoshi_cishu);
+            xianshiping_sendorder1("n3", shuimandengdaishijian_set);
+
+            set_once = false;
+        }
+    }
+    /*------------------------------5号洗膜设置-------------------------------*/
+    if (page == 5)
+    {
+        if (set_once == true)
+        {
+            xianshiping_sendorder1("n0", jingshuiximo_shichang);
+            xianshiping_sendorder1("n1", ximo_shuiliu_jiance_cishu);
+            xianshiping_sendorder1("n2", moci_ximo_maichong_biaozhun);
+            // xianshiping_sendorder1("n3", dcf_chxi_shichang);
+            set_once = false;
+        }
+    }
+    /*------------------------------11号亮度页面处理-------------------------------*/
+    if (page == 7)
+    {
+        if (set_once == true)
+        {
+
+            xianshiping_sendorder1("n0", brightness);
+            set_once = false;
+        }
+    }
+}
+void serial_print(byte *rcv, int len)
+{
+    int i;
+    Serial.print("jie shou:");
+    Serial.println(len, DEC);
+    for (i = 0; i < len; i++)
+    {
+        Serial.print(rcv[i], 16);
+        Serial.print(" ");
+    }
+    Serial.println("");
+}
+void chaolvchongxi()
+{
+
+    xianshiping_sendorder2("zhuangtai", "正在冲洗超滤"); //发到串口屏 开始上电默认冲洗超滤
+
+    for (int i = 0; i < chxi_cishu; i++) //冲洗设定次
+    {
+        chaolvchongxi_zongcishu = chaolvchongxi_zongcishu + 1;
+        //String s = itoa(chaolvchongxi_zongcishu, str, 10);
+        EEPROM.writeULong(8, chaolvchongxi_zongcishu); //储存总次数
+        if (EEPROM.commit())
+        {
+            tiaoshi("成功写入");
+        }
+        else
+        {
+            tiaoshi("写入失败");
+        }
+        xianshiping_sendorder2("shuju", "超滤冲洗次数：" + (String)chaolvchongxi_zongcishu);
+        delay(2000);
+        tiaoshi("chongxi chlv");
+        digitalWrite(chaolv, HIGH); //打开超滤电磁阀
+
+        Serial.println(chaolvchongxi_zongcishu, DEC);
+
+        detect(3000); //占3秒
+        xianshiping_sendorder2("shuju", "超滤冲洗脉冲数：" + (String)count);
+        delay(2000);
+        digitalWrite(chaolv, LOW);
+        delay(8000); //等待充水
+    }
+
+    chaolv_chxi = false; //需要超滤冲洗为假
+    detect(5000);        //占5秒
+    if (count > 20)      //检测超滤还有水流判断冲洗电磁阀漏水否
+    {
+        xianshiping_sendorder2("zhuangtai", "超滤冲洗电磁阀漏水");
+        delay(1000);
+    }
+    else
+    {
+        xianshiping_sendorder2("zhuangtai", "超滤冲洗电磁阀不漏水 ");
+        delay(1000);
+    }
+}
+
+void setup()
+{
+    Serial.begin(9600); //调试用串口
+
+    Serial1.begin(9600); //串口显示器
+    Serial2.begin(9600);
+
+    //WiFi.begin(ssid, password);
+
+    // Connect to WiFi network
+    // WiFi.begin(ssid, password);
+
+    Serial.println("");
+
+    // Wait for connection
+    //if (WiFi.status() != WL_CONNECTED)
+    //{
+    //   delay(500);
+    //  Serial.print(".");
+    // }
+    // Serial.println("");
+    //Serial.print("Connected to ");
+    //Serial.println(ssid);
+    //Serial.print("IP address: ");
+    // Serial.println(WiFi.localIP());
+
+    //ota(); //
+
+    // EEPROM.setMemPool(0, 4095);
+    //EEPROM.setMaxAllowedWrites(maxAllowedWrites);
+
+    /*22脚作为低压开关输入，24作为高压开关输入，  2脚作为流量传感器输入,2脚支持中断，
+	26作为高压开关输入,全部默认高电平*/
+    pinMode(diyakg, INPUT_PULLUP);
+    pinMode(ximo_gaoyakg, INPUT_PULLUP);
+    pinMode(yinyong_gaoyakg, INPUT_PULLUP);
+    pinMode(shengchan_gaoyakg, INPUT_PULLUP);
+    pinMode(jingshui_chaoya, INPUT_PULLUP);
+    pinMode(shuiliu_chuanganqi, INPUT_PULLUP);
+
+    pinMode(chaolv, OUTPUT);
+    pinMode(jingshui, OUTPUT);
+    pinMode(gaoyabeng, OUTPUT);
+    pinMode(youxian, OUTPUT);
+    pinMode(zongjin, OUTPUT);
+    pinMode(jiare, OUTPUT);
+
+    closeall();
+
+    if (!EEPROM.begin(200))
+    {
+        Serial.println("failed to initialise EEPROM");
+        delay(1000000);
+    }
+
+    EEPROM.writeULong(60, 1); //工作总时间置零
+
+    chaolv_chongxi_maichong_dixian = EEPROM.readByte(0); //超滤冲洗脉冲底限 0
+    loushui_maich_biaozhun = EEPROM.readByte(2);         //超滤漏水脉冲标准
+    chxi_cishu = EEPROM.readByte(4);                     //单回超滤冲洗次数
+    leiji_biaozhun = EEPROM.readByte(6);                 //制水累计多长时间冲洗一次超滤
+    chaolvchongxi_zongcishu = EEPROM.readULong(8);       //总次数  8地址开始存放超滤冲洗次数，占4个字节
+    // tiaoshi("冲洗次数：" + (String)chaolvchongxi_zongcishu);
+
+    zhishuishijian_set = EEPROM.readByte(50); //单次制水限时,50
+    tiaoshi("制水限时：" + (String)zhishuishijian_set);
+    zhishui_maichong_biaozhun = EEPROM.readByte(52); //制水时最小脉冲数,52
+                                                     // tiaoshi("制水脉冲标准：" + (String)zhishui_maichong_biaozhun);
+    chaoshi_cishu = EEPROM.readByte(54);             //制水时允许的超时次数
+    shuimandengdaishijian_set = EEPROM.readByte(56); //净水电磁阀关闭后的水满等待时间 56
+    zhishuizongshijian = EEPROM.readULong(60);       //制水总时间   从60地址开始存放制水总时间,占4个字节
+    tiaoshi("制水总分钟：" + (String)zhishuizongshijian);
+
+    jingshuiximo_shichang = EEPROM.readByte(100);       //净水洗膜时长
+    ximo_shuiliu_jiance_cishu = EEPROM.readByte(102);   //洗膜水流检测次数 102
+    moci_ximo_maichong_biaozhun = EEPROM.readByte(104); //洗膜末次脉冲标准，低于此值认为气囊失效 104
+
+    // brightness = p.getChar("brightness", 20); //显示屏亮度值
+
+    chaolv_chxi = true; //开机冲洗一次超滤
+
+    Serial2.print("page 0"); //同步到首页。
+    for (int i = 0; i < 3;)
+    {
+        Serial2.write(0xff);
+        i++;
+    }
+}
+
+void loop()
+{/*--------------------------------意外保护-------------------------------------------*/
+    if (digitalRead(jingshui_chaoya) == 1) //净水超压保护
+    {
+        if (jingshui_chaoya_begin == 0)
+        {
+            xianshiping_sendorder2("净水超压，报售后");
+            closeall();
+        }
+        if (millis() > (jingshui_chaoya_begin + 8000))
+        {
+            jingshui_chaoya_begin = 0;
+        }
+
+        return;
+    }
+
+    if (feishuiguoshao == true) //废水过少故障停机
+    {
+        unsigned long dengdai;
+
+        if (tiaoshikg == true)
+        {
+            dengdai = 60000;
+        }
+        else
+        {
+            dengdai = 1800000;
+        }
+
+        if (begintime_baohu == 0)
+        {
+            begintime_baohu = millis();
+            tiaoshi("废水过少故障停机,30分钟后试运行");
+
+            xianshiping_sendorder2("zhuangtai", "废水过少故障等待");
+            xianshiping_sendorder2("shuju", "废水过少故障停机,30分钟后试运行");
+            closeall();
+            digitalWrite(jingshui, LOW); //保持净水关闭，可能可以洗膜
+        }
+        endtime_baohu = millis();
+        if (endtime_baohu - begintime_baohu > dengdai)
+        {
+
+            xianshiping_sendorder2("zhuangtai", "保护停机30分钟后试运行");
+            tiaoshi("30分钟后试运行");
+
+            feishuiguoshao_times = 0; //复位
+            begintime_baohu = 0;
+            endtime_baohu = 0;
+            feishuiguoshao = false;
+        }
+
+        return;
+
+        //if(zhishui_starttime==0){ tiaoshi("zhishui=0") ;  }
+    }
+
+   
+    if (alarm1 == true)//净水不能水满
+    {
+        xianshiping_sendorder2("shuju", "联系售后：17737203569 梁，开启紧急供水阀门");
+        //xianshiping_sendorder2("guzh_tishi", "净水关闭输出7分钟后不能水满停机，报警停机");
+        tiaoshi("净水关闭输出7分钟后不能水满停机，报警停机");
+        closeall();
+        delay(5000);
+        return;
+    }
+ /*----------------------------------------------------*/
+    // server.handleClient();
+    // delay(1);
+
+    while (Serial2.available() > 0 && (parse_ready) == false) //读取串口，获取数据后返回
+    {
+        buffer[buffer_index] = Serial2.read();
+        /* if(buffer_index==0)   为了避免第一个字节是0xff，但很容易死机，不知为什么。2018.11.26晚
+        {
+          while (buffer[0] == 0xff)
+            {
+            buffer[0] == Serial2.read();
+            }
+        }*/
+
+        if (buffer[buffer_index] == 0xff) //三个0xff结尾
+        {
+
+            buffer[buffer_index + 1] = Serial2.read(); //读第二个结束符
+            if (buffer[buffer_index + 1] == 0xff)
+            {
+                buffer[buffer_index + 2] = Serial2.read(); //读第三个结束符
+                if (buffer[buffer_index + 2] == 0xff)
+                {
+                    Serial.print("接收一次完整数据");
+                    serial_print(buffer, buffer_index + 3);
+                    //serial_print(buffer, buffer_index + 1);
+                    buffer_index = 0;   //读完后赋值零
+                    parse_ready = true; //需要解析命令
+
+                    return; //提高串口处理速度，直接返回，效果很好
+                }
+            }
+        }
+
+        buffer_index++;
+    }
+
+    if (parse_ready == true) //
+    {
+        serial_command_parse(); //获取页号和数据
+
+        parse_ready = false;
+    }
+
+    send_order(); //没有接收到指示错误的命令后，查询需要发布的命令
+        /*--------------------制水时间计算--------------------------------*/
+    if (zhishui_starttime == 0 && digitalRead(gaoyabeng) == 1) //给开始时间赋值一次
+    {
+        zhishui_starttime = millis(); //
+        zhishui_endtime = 0;
+    }
+    if (zhishui_endtime == 0 && digitalRead(gaoyabeng) == 0)
+    {
+        zhishui_endtime = millis(); //制水结束时间
+        tiaoshi((String)((int)((zhishui_endtime - zhishui_starttime) / 60000)));
+        zhishuizongshijian = zhishuizongshijian + (int)((zhishui_endtime - zhishui_starttime) / 60000); //分钟
+        EEPROM.writeULong(60, 0);
+        EEPROM.writeULong(60, zhishuizongshijian); //60字节                                                                                             // p.putLong("zhishuizongshijian", zhishuizongshijian);                                            //写入制水总时间，分钟单位
+        decide_chaolv_chxi(zhishui_endtime - zhishui_starttime);
+        zhishui_starttime = 0; //制水开始时间复位
+    }
+
+    if (digitalRead(diyakg) == 0 && digitalRead(jingshui_chaoya == 0)) //低压开关接通, 水源水压正常,净水超压开关闭合证明没有超压*/
+    {
+        /*--------------------冲洗超滤--------------------------------*/
+        if (digitalRead(gaoyabeng) == 0) //保证泵停止冲洗超滤
+        {
+            if (chaolv_chxi == true) /*第一次启动冲洗或累积时间超过1小时冲洗*/
+            {
+                xianshiping_sendorder2("zhuangtai", "制水累计超过设定时间冲洗一次");
+
+                tiaoshi("冲洗超滤");
+                chaolvchongxi();
+            }
+        }
+        /*--------------------------------饮用净水制水中。。。-------------------------------------------*/
+        if (digitalRead(yinyong_gaoyakg) == 0 && xuyao_ximo == false) /*生活净水不满且洗完膜，需要制水*/
+        {
+            if (digitalRead(gaoyabeng) == 0) //只进入一次
+            {
+                xianshiping_sendorder2("zhuangtai", "开始饮用净水制水"); //开始制水
+
+                tiaoshi("开始制水");
+                digitalWrite(zongjin, HIGH); //总进水打开
+                digitalWrite(youxian, HIGH);
+                digitalWrite(gaoyabeng, HIGH); /*打开高压泵*/
+                digitalWrite(jingshui, HIGH);  //洗膜准备净水
+                begintime = millis();          //高压泵工作开始时间
+                yinyong_zhishui = true;
+            }
+
+            /*------------------洗膜水提前储存-------------------------------------*/
+            if (digitalRead(gaoyabeng) == 1 && digitalRead(jingshui) == 1) /*制水中,,净水电磁阀关闭*/
+            {
+                xianshiping_sendorder2("zhuangtai", "净水电磁阀关闭，等待水满");
+
+                if (digitalRead(ximo_gaoyakg) == 0) //洗膜高压开关没有断开
+                {
+                    if (millis() > begintime + shuimandengdaishijian_set * 60000) //超过设定的分钟数，变成毫秒
+                    {
+                        //7分钟内没有断开，属故障情况
+
+                        xianshiping_sendorder2("zhuangtai", "净水输出关闭" + (String)shuimandengdaishijian_set + "分钟后任然不能水满，故障停机"); //净水输出关闭7分钟后任然不能水满，故障停机
+                        tiaoshi("净水输出关闭" + (String)shuimandengdaishijian_set + "分钟后任然不能水满，故障停机");
+
+                        delay(2000);
+                        alarm1 = true; //报警为真
+                        closeall();    //关闭所有设备。
+
+                        return;
+                    }
+                }
+                if (digitalRead(ximo_gaoyakg) == 1) //洗膜高压开关断开
+                {
+                    digitalWrite(jingshui, LOW); //净水电磁阀失电打开
+                }
+            }
+
+            /*-------------------------正常饮用水制水---------------------------------*/
+
+            if (digitalRead(gaoyabeng) == 1 && digitalRead(jingshui) == 0) /*制水中,,净水电磁阀打开，多次进入*/
+            {
+                xianshiping_sendorder2("zhuangtai", "饮用净水制水中。。。");
+
+                xianshiping_sendorder2("shuju", "制水时水流脉冲最小值：" + (String)zhishui_maichong_biaozhun);
+
+                xianshiping_sendorder2("zhuangtai", "制水总分钟：" + (String)zhishuizongshijian);
+                tiaoshi("制水脉冲标准：" + (String)zhishui_maichong_biaozhun);
+
+                if (millis() < begintime + zhishuishijian_set * 60000) //制水时间不超过设定时间
+
+                {
+                    detect(3000); //显示水流传感器开关次数
+
+                    xianshiping_sendorder2("shuju", "制水时脉冲数：" + (String)count);
+
+                    xianshiping_sendorder2("zhuangtai", "饮用净水制水已用时：" + (String)((millis() - begintime) / 60000) + "分钟");
+
+                    if (count < zhishui_maichong_biaozhun)
+                    {
+                        feishuiguoshao_times++;
+                        String tt = itoa(feishuiguoshao_times, str, 10);
+
+                        xianshiping_sendorder2("zhuangtai", "废水过少:" + tt + "次");
+                    }
+                    else
+                    {
+                        xianshiping_sendorder2("zhuangtai", "废水流量正常");
+
+                        feishuiguoshao_times = 0;
+                    }
+                    if (feishuiguoshao_times >= 8)
+                    {
+                        xianshiping_sendorder2("zhuangtai", "废水过少布尔值为真");
+                        //xianshiping_sendorder2(0,"zhuangtai", "报警");
+
+                        feishuiguoshao = true;
+                        return;
+                    }
+                }
+                else //制水时间设定，只进入1次
+                {
+                    xuyao_ximo = true;
+                    digitalWrite(gaoyabeng, LOW); //关闭高压泵和膜进水
+                    digitalWrite(zongjin, LOW);   //关闭总进水
+                    xianshiping_sendorder2("zhuangtai", "制水时间超过单次设定时间");
+                    tiaoshi("制水时间超过单次设定时间");
+
+                    // digitalWrite(jingshui, HIGH); /*净水电磁阀得电关闭,下次循环不会进入*/
+                    chaolv_chxi = true; //需要冲洗超滤
+                    chaoshi_cishu++;
+
+                    xianshiping_sendorder2("shuju", "制水超时次数：" + (String)chaoshi_cishu); //显示超时次数
+                }
+            }
+        }
+        if (digitalRead(yinyong_gaoyakg) == 0)
+        {
+            if (yinyong_zhishui == false)
+            {
+                xianshiping_sendorder2("zhuangtai", "饮用净水需要制水"); //
+            }
+        }
+
+        if (digitalRead(yinyong_gaoyakg) == 1) /*生活净水不满且洗完膜，需要制水*/
+        {
+            xianshiping_sendorder2("zhuangtai", "饮用净水水满"); //
+
+            if (yinyong_zhishui == true) //进入一次
+            {
+                digitalWrite(zongjin, LOW); //关闭总进水
+                digitalWrite(gaoyabeng, LOW);
+                digitalWrite(youxian, LOW); //关闭优先电磁阀
+                yinyong_zhishui = false;
+            }
+        }
+
+        if (digitalRead(shengchan_gaoyakg) == 0 && xuyao_ximo == false && digitalRead(yinyong_gaoyakg) == 1) /*生活净水满后且洗完膜，需要生产制水*/
+        {
+            if (digitalRead(gaoyabeng) == 0) //只赋值一次
+            {
+                xianshiping_sendorder2("zhuangtai", "开始生产用净水制水"); //开始制水,进入一次
+
+                tiaoshi("开始制水");
+                digitalWrite(zongjin, HIGH);   /*打开总进水*/
+                digitalWrite(gaoyabeng, HIGH); /*打开高压泵*/
+                shchan_zhishui = true;
+                begintime = millis(); //单次制水开始时间
+            }
+            /*------------------洗膜水提前储存-------------------------------------*/
+            if (digitalRead(gaoyabeng) == 1 && digitalRead(jingshui) == 1) /*制水中,,净水电磁阀关闭*/
+            {
+                xianshiping_sendorder2("zhuangtai", "净水电磁阀关闭，等待水满");
+
+                if (digitalRead(ximo_gaoyakg) == 0) //洗膜高压开关没有断开
+                {
+
+                    if (millis() > begintime + shuimandengdaishijian_set * 60000) //超过设定的分钟数，变成毫秒
+                    {
+                        //7分钟内没有断开，属故障情况
+
+                        xianshiping_sendorder2("zhuangtai", "净水输出关闭" + (String)shuimandengdaishijian_set + "分钟后任然不能水满，故障停机"); //净水输出关闭7分钟后任然不能水满，故障停机
+                        tiaoshi("净水输出关闭7分钟后任然不能水满，故障停机");
+
+                        alarm1 = true; //报警为真
+                        closeall();    //关闭所有设备。
+
+                        return;
+                    }
+                }
+                if (digitalRead(ximo_gaoyakg) == 1) //洗膜高压开关断开
+
+                {
+                    digitalWrite(jingshui, LOW); //净水电磁阀失电打开
+                }
+            }
+
+            /*------------------生产用净水制水中-------------------------------------*/
+
+            if (digitalRead(gaoyabeng) == 1 && digitalRead(jingshui) == 0) /*制水中,同时检测不缺水,净水电磁阀没有打开*/
+            {
+
+                xianshiping_sendorder2("zhuangtai", "生产用净水制水中");
+
+                xianshiping_sendorder2("shuju", "制水时水流脉冲最小值：" + (String)zhishui_maichong_biaozhun);
+
+                xianshiping_sendorder2("zhuangtai", "制水总分钟：" + (String)zhishuizongshijian);
+                tiaoshi("制水脉冲标准：" + (String)zhishui_maichong_biaozhun);
+
+                // endtime = millis();
+
+                //if (endtime - begintime < zhishuishijian_set) //制水时间不超过1小时处理
+
+                if (millis() < begintime + zhishuishijian_set * 60000) //制水时间不超过设定时间
+
+                {
+                    detect(3000); //显示水流传感器开关次数
+                    xianshiping_sendorder2("shuju", "制水时脉冲数：" + (String)count);
+
+                    xianshiping_sendorder2("zhuangtai", "生产用制水已用时：" + (String)((millis() - begintime) / 60000) + "分钟");
+
+                    if (count < zhishui_maichong_biaozhun)
+                    {
+                        feishuiguoshao_times++;
+                        String tt = itoa(feishuiguoshao_times, str, 10);
+
+                        xianshiping_sendorder2("zhuangtai", "废水过少:" + tt + "次");
+                    }
+                    else
+                    {
+                        xianshiping_sendorder2("zhuangtai", "废水流量正常");
+                        feishuiguoshao_times = 0;
+                    }
+                    if (tiaoshi == false)
+                    {
+                        if (feishuiguoshao_times >= 8)
+                        {
+                            xianshiping_sendorder2("zhuangtai", "废水过少布尔值为真");
+                            feishuiguoshao = true;
+                            return;
+                        }
+                    }
+                }
+                else //制水时间超过1小时处理，只处理1次
+                {
+                    xuyao_ximo = true;
+                    digitalWrite(gaoyabeng, LOW); //关闭高压泵和进水
+                    digitalWrite(zongjin, LOW);   //关闭高压泵和进水
+                    xianshiping_sendorder2("zhuangtai", "制水时间超过单次设定时间");
+                    tiaoshi("制水时间超过单次设定时间");
+
+                    // digitalWrite(jingshui, HIGH); /*净水电磁阀得电关闭,下次循环不会进入*/
+                    chaolv_chxi = true; //需要冲洗超滤
+                    chaoshi_cishu++;
+
+                    xianshiping_sendorder2("shuju", "制水超时次数：" + (String)chaoshi_cishu); //显示超时次数
+                }
+            }
+        }
+        if (digitalRead(shengchan_gaoyakg) == 0)
+        {
+            if (shchan_zhishui == false)
+            {
+                xianshiping_sendorder2("zhuangtai", "生产净水需要制水"); //
+            }
+            if (digitalRead(yinyong_gaoyakg) == 0) //在生产用净水制水中如果饮用净水高压开关闭合，停止生产用净水制水
+            {
+                if (shchan_zhishui == true)
+                {
+                    digitalWrite(gaoyabeng, LOW);
+                    shchan_zhishui = false;
+                }
+            }
+        }
+        if (digitalRead(shengchan_gaoyakg) == 1)
+        {
+            xianshiping_sendorder2("zhuangtai", "生产净水水满"); //
+
+            if (shchan_zhishui == true) //进入一次
+            {
+                digitalWrite(zongjin, LOW);
+                digitalWrite(gaoyabeng, LOW);
+                shchan_zhishui = false;
+            }
+        }
+        /*净水电磁阀得电关闭净水输出，并且不缺水,等待水满*/
+        if (xuyao_ximo == true)
+        {
+            if (ximo_begin == 0)
+            {
+                ximo_begin = millis();
+                digitalWrite(gaoyabeng, LOW);
+                digitalWrite(zongjin, LOW);
+            }
+
+            xianshiping_sendorder2("zhuangtai", "强制停机洗膜");
+
+            xianshiping_sendorder2("zhuangtai", "洗膜设定时长：" + (String)(jingshuiximo_shichang) + "分钟"); //洗膜设定的总时长
+            delay(1000);
+            if (millis() < ximo_begin + jingshuiximo_shichang * 60000) //延时 ,会反复进入,变成毫秒
+            {
+                //tiaoshi("洗膜已用时：" + (String)(endtime - begintime) / 60000 + "分钟");
+                detect(3000);
+
+                xianshiping_sendorder2("shuju", "洗膜时水流脉冲数：" + (String)count);                                  //洗膜脉冲
+                xianshiping_sendorder2("zhuangtai", "洗膜已用时：" + (String)((endtime - begintime) / 60000) + "分钟"); //洗膜用时
+
+                // endtime = millis();
+            }
+            else //净水洗膜超过设定时间
+            {
+                xianshiping_sendorder2("zhuangtai", "净水洗膜结束"); //净水洗膜结束
+
+                xuyao_ximo = false;
+                ximo_begin = 0; //复位
+            }
+        }
+    }
+    else
+    { //缺水状态下如果没有延时会大量发送数据造成显示屏回传错误报警,间隔给显示屏数据
+        if (queshui_begin == 0)
+        {
+            xianshiping_sendorder2("zhuangtai", "缺水停机");
+            queshui_begin = millis();
+            tiaoshi("缺水提示一次");
+            // if(Serial2.available()==0){     tiaoshi("串口空");}
+            closeall();
+        }
+
+        if (millis() > (queshui_begin + 8000))
+        {
+            queshui_begin = 0;
+        }
+
+        if (digitalRead(zongjin) == 0 && digitalRead(gaoyabeng) == 0) //泵停止 总进关闭
+        {
+            xianshiping_sendorder2("漏水或膜进水电磁阀关闭不严！")
+        }
+    }
+}
