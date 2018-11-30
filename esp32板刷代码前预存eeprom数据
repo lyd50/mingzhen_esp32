@@ -1,0 +1,72 @@
+/*
+   EEPROM Write
+
+   Stores random values into the EEPROM.
+   These values will stay in the EEPROM when the board is
+   turned off and may be retrieved later by another sketch.
+*/
+
+#include "EEPROM.h"
+
+// the current address in the EEPROM (i.e. which byte
+// we're going to write to next)
+int addr = 0;
+#define EEPROM_SIZE 200
+void setup()
+{
+  Serial.begin(115200);
+  Serial.println("start...");
+  if (!EEPROM.begin(EEPROM_SIZE))
+  {
+    Serial.println("failed to initialise EEPROM"); delay(1000000);
+  }
+  //Serial.println(" bytes read from Flash . Values are:");
+ if (!EEPROM.begin(200))
+	{
+		Serial.println("failed to initialise EEPROM");
+		delay(1000000);
+	}
+//chaolv_chongxi_maichong_dixian = 
+EEPROM.writeByte(0,0); //超滤冲洗脉冲底限 
+	//loushui_maich_biaozhun = 
+  EEPROM.writeByte(2,30);         //超滤漏水脉冲标准
+	//chxi_cishu = 
+  EEPROM.writeByte(0,2);                     //单回超滤冲洗次数
+	//leiji_biaozhun = 
+  EEPROM.writeByte(6,50);                 //制水累计多长时间冲洗一次超滤
+	//chaolvchongxi_zongcishu = 
+  EEPROM.writeULong(8,0);       //总次数
+	// tiaoshi("?????????" + (String)chaolvchongxi_zongcishu);
+
+	//zhishuishijian_set =
+   EEPROM.writeByte(50,50); //单次制水限时,50
+	//tiaoshi("制水限时：" + (String)zhishuishijian_set);
+//	zhishui_maichong_biaozhun =
+ EEPROM.writeByte(52,100); //制水时最小脉冲数,52
+													 // tiaoshi("???????????" + (String)zhishui_maichong_biaozhun);
+	//chaoshi_cishu = 
+  EEPROM.writeByte(54,0);             //制水时允许的超时次数
+	//shuimandengdaishijian_set = 
+  EEPROM.writeByte(56,6); //净水电磁阀关闭后的水满等待时间 56
+	//zhishuizongshijian = 
+  EEPROM.writeULong(60,0);       //制水总时间   从60地址开始存放制水总时间,占4个字节
+	//tiaoshi("?????????" + (String)zhishuizongshijian);
+
+	//jingshuiximo_shichang = 
+  EEPROM.writeByte(100,8);       //净水洗膜时长
+	//ximo_shuiliu_jiance_cishu = 
+  EEPROM.writeByte(102,10);   //洗膜水流检测次数 102
+	//moci_ximo_maichong_biaozhun =
+   EEPROM.writeByte(104,5); //洗膜末次脉冲标准，低于此值认为气囊失效 104
+   // guanbi=
+   EEPROM.writeBool(106,false);//默认开机
+  
+
+ EEPROM.commit();
+
+}
+
+void loop()
+{
+ 
+}
