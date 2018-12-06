@@ -1,0 +1,69 @@
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
+
+const char* ssid     = "******";
+const char* password = "*****";
+IPAddress ip(192, 168, 2, 12);
+IPAddress gateway(192, 168, 2, 1);
+IPAddress subnet(255, 255, 255, 0);
+// INCLUDE MASSAGE PARSER
+#include <AsciiMassageParser.h>
+// INCLUDE MASSAGE PACKER
+#include <AsciiMassagePacker.h>
+// INSTANCIATE PACKER(FOR SENDING) AND PARSER(FOR RECEIVING) INSTANCES.
+AsciiMassageParser inbound;
+AsciiMassagePacker outbound;
+#include <Chrono.h>
+Chrono sendMassageChrono;
+WiFiUDP udp;
+#define BUFFER_LENGTH 64
+char receivedString[BUFFER_LENGTH];
+String state="";
+void setup() {
+   Serial.begin(9600);
+
+  // [START] BEGIN WIFI
+  WiFi.config(ip , gateway , subnet );
+  WiFi.begin(ssid, password);
+  
+	if (WiFi.status() != WL_CONNECTED)
+	{
+		for (int i = 0; i < 20;)
+		{
+			delay(500);
+			Serial.print(".");
+			i++;
+		}
+	}
+udp.begin(7777); // BEGIN LISTENING ON UDP PORT 7777.
+
+
+
+
+}
+
+void loop() {
+  
+  if ( udp.parsePacket() )
+   {
+    // [START] AN UDP PACKET WAS RECEIVED
+    if ( inbound.parseStream( &udp ) ) {
+      // [START] A MASSAGE WAS PARSED
+      if ( inbound.fullMatch("address") ) {
+       int stringLength = inbound.nextString(receivedString,BUFFER_LENGTH);
+       for(int i=0;i<stringLength;i++)
+       {  state=state+(String)receivedString[i];
+            
+       }
+       if(state=="ok"){Serial.println("ok") ;   }
+      }
+      // [END] A MASSAGE WAS PARSED
+    }
+    // [END] AN UDP PACKET WAS RECEIVED
+  }
+  // [END] RECEIVE PACKETS OVER UDP.
+
+
+  
+}
