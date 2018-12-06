@@ -1,0 +1,982 @@
+#include <Arduino.h>
+#include "canshu.h"
+#include "EEPROM.h"
+//#include "hz.h"
+#define EEPROM_SIZE 200
+#include <rom/rtc.h>
+#include "EdpKit.h"
+void tiaoshi(String pingmuxianshi)
+{
+
+	if (tiaoshikg == true)
+	{
+
+		Serial.println(pingmuxianshi);
+	}
+}
+
+void rcvDebug(unsigned char *rcv, int len)
+{
+	int i;
+
+	Serial.print("edp接收的数据");
+	Serial.println(len, DEC);
+	for (i = 0; i < len; i++)
+	{
+		Serial.print(rcv[i], 10);
+		Serial.print(" ");
+	}
+	Serial.println("");
+}
+
+/*void edp_reponse(int response_type)
+{
+	//ESP.wdtFeed();
+
+	
+
+	int byte_count = edp_client.available();
+	//memset(buffer, 0, 200);
+	if (byte_count > 0) //??????
+	{
+		//buffer=   client.readBytesUntil('\r')
+		for (int e = 0; e < byte_count; e++)
+		{ //edp.UnpackConnectResp=edp_client.read();
+			edp_buffer[e] = edp_client.read();
+		}
+		rcvDebug(edp_buffer, byte_count);
+		//tiaoshi("??????????"+ edp.UnpackConnectResp(edp_buffer)) ;
+		switch (response_type)
+		{ //?锟???????????
+
+		case 1:
+
+			//Serial.println("edp???????");
+			//0x20 0x02 0x0 0x0
+
+			if (edp_buffer[0] == 0x20 && edp_buffer[2] == 0x00 && edp_buffer[3] == 0x00)
+			{
+				Serial.println("EDP连接成功");
+				edpConnected = true;
+				edp_disconnect_count = 0;
+				//f_zhuang_tai("EDP ??????");
+				//edp_upload_string("wifi", "wifi??????????");
+			}
+
+			else
+			{	edpConnected = false;
+				edp_disconnect_count++; //????????????1
+				
+				Serial.println("edp连接失败");
+			}
+
+			break;
+			//????????2????? 208 0 ?? 0xD0 0
+		case 2:
+			//Serial.println("edp ???????");
+
+			if (edp_buffer[0] == B11010000 && edp_buffer[1] == B00000000)
+			{
+				edpConnected = true;
+				edp_disconnect_count = 0; //??????????
+				edp_upload_string("heart beat", "received ok");//
+				tiaoshi("EDP心跳成功接收返回数据");
+				//f_zhuang_tai("???????????????????????");
+			}
+			else
+			{				
+				edpConnected = false;   //????????????閿熸枻锟????
+				edp_disconnect_count++; //????????????1
+				tiaoshi("EDP心跳返回数据错误");
+			}
+			break;
+		}
+	}
+
+	else
+	{
+		Serial.println("娌℃湁鎺ユ敹鍒版暟锟???");
+		edpConnected = false;
+		edp_disconnect_count++; //edp????????????1								
+	}
+}*/
+
+void edp_packet_send()
+{ //发送前清空客户端数据
+	while (edp_client.available())
+	{
+		edp_client.read();
+	} 
+	if (!edp_client.connected())
+	{
+		edp_client.connect(edp_server, edp_port);
+		Serial.print("连接到物联网：");
+		Serial.println((String)edp_server);
+	}
+	if (edp_client.connected())
+	{
+		edp_client.write(edp.GetData(), edp.GetWritepos());		
+	}
+	
+}
+void closeall() /*?????????*/
+{
+	digitalWrite(chaolv, LOW);
+	digitalWrite(mo_jinshui, LOW);//????
+	digitalWrite(chongxi, LOW);//????
+	digitalWrite(jingshui, LOW);
+	digitalWrite(gaoyabeng, LOW);
+	digitalWrite(zongjin, LOW);
+	digitalWrite(youxian, LOW);
+	digitalWrite(jiare, LOW);
+}
+void count_function()
+{
+	count++;
+	delay(3);
+}
+void detect(unsigned long yongshi) /*???????,??锟斤拷????*/
+{
+	count = 0; /*????????????,???????*/
+	unsigned long begintime2 = millis();
+	unsigned long endtime2;
+	attachInterrupt(digitalPinToInterrupt(shuiliu_chuanganqi), count_function, FALLING);
+	do
+	{
+		endtime2 = millis();
+	} while (endtime2 - begintime2 < yongshi);
+
+	detachInterrupt(digitalPinToInterrupt(shuiliu_chuanganqi));
+}
+
+void decide_chaolv_chxi(unsigned long long1)
+{
+	//zhishuizongshijian = zhishuizongshijian + long1;
+	//EEPROM.writeLong(3, zhishuizongshijian);
+
+	accumulative = accumulative + long1;
+
+	if (accumulative > leiji_biaozhun * 60000)
+	{
+		chaolv_chxi = true;
+		accumulative = 0;
+	}
+}
+
+void xianshiping_sendorder1(String kongjian, int value) //?????????
+{
+
+	Serial2.print(kongjian + ".val=" + value + "");
+	for (int i = 0; i < 3;)
+	{
+		Serial2.write(0xff);
+		i++;
+	};
+}
+
+void xianshiping_sendorder2(String kongjian, String text) //?????????
+{
+	if (page == 0)
+	{
+		Serial2.print(kongjian + ".txt=\"" + text + "\"");
+		for (int i = 0; i < 3;)
+		{
+			Serial2.write(0xff);
+			i++;
+		}		
+	}
+	//delay(1500);
+}
+
+
+void check_wifi() //锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷
+{
+	if (WiFi.status() != WL_CONNECTED)
+	{
+		WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
+	}
+	if ((WiFi.status() != WL_CONNECTED)) //閲濇柊WiFi杩炴帴鍧庤繕娌℃湁鎴濆姛
+	{
+		xianshiping_sendorder2("zhuangtai", "wifi重新连接失败");
+		
+		wifi_disconnect_count++;//WiFi失败次数加1
+		
+		tiaoshi("wifi重新连接失败");
+	}
+	else //WiFi重新连接成功
+	{		wifi_disconnect_count = 0; //WiFi失败次数置零
+	    tiaoshi("wifi连接正常")	;	
+	}
+}
+
+bool wifi_client_connect() //检查到物联网服务器连接状态
+{
+	if (!edp_client.connected())
+	{
+		if (WiFi.status() == WL_CONNECTED)
+		{
+			edp_client.connect(edp_server, edp_port);
+			Serial.print("连接到：");
+			Serial.println((String)edp_server);
+		}
+		
+
+		if (edp_client.connected())
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+	else //连接状态
+	{   tiaoshi("连接到物联网服务器正常");
+		return true;
+	}
+}
+void edp_first_connect()
+{
+	if (WiFi.status() == WL_CONNECTED) //WiFi连接成功
+	{
+		if (wifi_client_connect() == true) //WiFi连接到网站成功
+		{
+			edp.PacketConnect1(device_id, apikey);
+			edp_packet_send();
+			edp.ClearParameter();
+			//edp_reponse(1);
+		}
+	}
+}
+
+void edp_heartbeat()
+{
+	//ESP.wdtFeed();
+	if (WiFi.status() == WL_CONNECTED) //WiFi连接状态
+	{
+		if (wifi_client_connect() == true) //WiFi连接到网站成功
+		{
+			edp.PacketPing(); //请求是：192 0  0xC0 0
+			if (tiaoshikg == true)
+			{
+				rcvDebug(edp.GetData(), edp.GetWritepos());
+			}
+
+			edp_packet_send();
+			//Serial.println("?????????????");
+			edp.ClearParameter();
+			//edp_reponse(2); //判断心跳返回是否成功
+		}
+		else
+		{
+			edpConnected = false;
+		}
+	}
+	else
+	{
+		edpConnected = false;
+	}
+}
+
+void edp_upload_int(String data_stream_id, int datapoint) //锟较达拷WiFi锟脚猴拷强锟斤拷锟角革拷值
+{
+	if (edpConnected == true)
+	{
+
+		//ESP.wdtFeed();
+		//Serial.println("锟较达拷锟斤拷一锟斤拷锟斤拷锟斤拷");
+		String input = "{\"" + data_stream_id + "\":" + datapoint + "}\"";
+
+		cJSON *cj = cJSON_Parse(input.c_str());
+
+		edp.PacketSavedataJson("", cj, 3, 0);
+		edp_packet_send();
+		cJSON_Delete(cj); //锟斤拷锟斤拷锟缴撅拷锟斤拷锟絥odemcu锟斤拷锟斤拷锟斤拷
+		while (edp_client.available())
+		{
+			edp_client.read();
+		} //锟斤拷锟斤拷锟秸存储确锟斤拷
+		edp.ClearParameter();
+	}
+}
+void edp_upload_string(String data_stream_id, String datapoint)
+{
+	if (edpConnected == true)
+	{
+
+		//ESP.wdtFeed();
+		//Serial.println("锟较达拷锟斤拷一锟斤拷锟街凤拷锟斤拷");
+
+		String input = ",;";
+		input += data_stream_id + ",";
+		input += datapoint; //锟斤拷确锟斤拷式
+
+		//EdpPacket*	edp = NewBuffer();
+
+		edp.PacketSavedataSimpleString(device_id, input.c_str());
+		edp_packet_send();
+		while (edp_client.available())
+		{
+			edp_client.read();
+		} //锟斤拷锟斤拷锟秸存储确锟斤拷
+
+		//DeleteBuffer(&edp);
+		edp.ClearParameter();
+	}
+}
+
+void edp_command_parse() //解析物联网返回的数据
+	int byte_count = edp_client.available();
+	//memset(buffer, 0, 200);
+	if (byte_count > 0) //??????
+	{
+		//buffer=   client.readBytesUntil('\r')
+		for (int e = 0; e < byte_count; e++)
+		{ //edp.UnpackConnectResp=edp_client.read();
+			edp_buffer[e] = edp_client.read();
+		}
+		rcvDebug(edp_buffer, byte_count);
+		
+		//0x20 0x02 0x0 0x0  32 0 0
+
+			if (edp_buffer[0] == 0x20 && edp_buffer[2] == 0x00 && edp_buffer[3] == 0x00)
+			{
+				Serial.println("EDP连接成功");
+				edpConnected = true;
+				edp_disconnect_count = 0;
+				//f_zhuang_tai("EDP ??????");
+				//edp_upload_string("wifi", "wifi??????????");
+			}
+		
+			//返回应该是：208 0   0xD0 0		
+
+			else if (edp_buffer[0] == 0xD0 && edp_buffer[1] == 0x0)
+			{
+				edpConnected = true;
+				edp_disconnect_count = 0;						//??????????
+				edp_upload_string("heart beat", "received ok"); //
+				tiaoshi("EDP心跳成功接收返回数据");
+				//f_zhuang_tai("???????????????????????");
+			}		
+
+		int order_type = (int(buffer[44]) - 48) * 10; //Serial.println(order_type);
+		order_type = order_type + (int(buffer[45]) - 48);
+		int value;
+
+		//Serial.println(value);
+		switch (order_type)
+		{
+			/*------------------------------------锟斤拷锟斤拷停止锟斤拷锟斤拷锟斤拷?锟斤拷------------------------------------------*/
+		case 1:								   //约锟斤拷锟斤拷压锟斤拷锟截非接地端匡拷锟狡ｏ拷
+			value = int(buffer[46] - 48) * 10; //Serial.println(value);
+			value = value + (int(buffer[47]) - 48);
+			switch (value)
+			{
+			case 1: //锟斤拷压锟斤拷锟截接碉拷锟斤拷痈叩锟轿伙拷谢锟????  0101
+
+				Serial.println("锟斤拷锟斤拷状态转锟斤拷");
+				guanbi = !guanbi;   //要锟斤拷锟斤拷锟斤拷锟街碉拷锟戒。
+				if (guanbi == true) //锟斤拷值时
+				{
+					//edp_upload_int("停锟斤拷", 1);
+
+					EEPROM.writeBool(106, true); //106
+					guanbi = true;
+					//digitalWrite(D5, LOW);//锟斤拷压锟斤拷锟截接地ｏ拷锟斤拷锟斤拷锟斤拷锟斤拷
+					edp_upload_string("锟斤拷锟斤拷锟斤拷", "锟斤拷锟斤拷值锟斤拷效锟斤拷锟窖撅拷锟叫伙拷");
+					edp_upload_string("锟斤拷锟斤拷状态", "停锟斤拷");
+				}
+				else
+				{
+					//digitalWrite(D5, HIGH);//锟斤拷压锟斤拷锟截接高碉拷位锟斤拷停止锟斤拷锟斤拷
+					guanbi = false;
+					EEPROM.write(403, 0); //写锟斤拷eeprom
+					//edp_upload_int("锟斤拷锟斤拷", 0);
+					edp_upload_string("锟斤拷锟斤拷锟斤拷", "锟斤拷锟斤拷值锟斤拷效锟斤拷锟窖撅拷锟叫伙拷");
+					edp_upload_string("锟斤拷锟斤拷状态", "锟斤拷锟斤拷");
+				}
+				break;
+			default:
+				edp_upload_string("锟斤拷锟斤拷锟斤拷", "锟斤拷锟斤拷值锟斤拷效");
+				EEPROM.commit();
+
+				break;
+			}
+
+			break;
+			/*-------------------------------------------锟借定锟斤拷水时浓水------------------------------------------*/
+		case 2:								   //锟斤拷水时浓水  02{V}
+			value = int(buffer[46] - 48) * 10; //Serial.println(value);
+			value = value + (int(buffer[47]) - 48);
+
+			if (10 < value < 30)
+			{
+				//nongshui = value;
+				// EEPROM.write(400, nongshui); //写锟斤拷eeprom
+				Serial.println("锟斤拷水时浓水锟借定锟缴癸拷");
+				edp_upload_string("锟斤拷锟斤拷锟斤拷", "锟斤拷锟斤拷值锟斤拷效锟斤拷锟斤拷水时浓水锟斤拷小锟借定锟缴癸拷");
+
+				// f_zhuang_tai("锟斤拷锟斤拷值锟斤拷效锟斤拷锟斤拷水时浓水锟斤拷小锟借定锟缴癸拷");
+				// upload_alert_standard(); //锟较憋拷锟斤拷锟斤拷锟斤拷准
+			}
+			EEPROM.commit();
+			break;
+			/*-------------------------------------------锟借定洗膜时浓水------------------------------------------*/
+
+		case 3: //洗膜浓水 03{V}
+
+			if ((buffer[1] == 45))
+			{
+				value = int(buffer[46]) - 48;
+			}
+			if ((buffer[1] == 46))
+			{
+				value = int(buffer[46] - 48) * 10; //Serial.println(value);
+				value = value + (int(buffer[47]) - 48);
+			}
+			//ximo_sudu = value;
+			//EEPROM.write(402, ximo_sudu); //写锟斤拷eeprom
+			Serial.println("洗膜时浓水锟借定锟缴癸拷");
+			edp_upload_string("锟斤拷锟斤拷锟斤拷", "锟斤拷锟斤拷值锟斤拷效锟斤拷洗膜时浓水锟斤拷小锟借定锟缴癸拷");
+			//upload_alert_standard(); //锟较憋拷锟斤拷锟斤拷锟斤拷准
+
+			// f_zhuang_tai("锟斤拷锟斤拷值锟斤拷效锟斤拷洗膜时浓水锟斤拷小锟借定锟缴癸拷");
+			EEPROM.commit();
+			break;
+			/*-------------------------------------------压锟斤拷桶失效时锟斤拷锟借定------------------------------------------------*/
+		case 4: //04{V}
+			if ((buffer[1] == 45))
+			{
+				value = int(buffer[46]) - 48;
+			}
+			// yalitong_shuiman_fenzhong = value;
+			// EEPROM.write(401, yalitong_shuiman_fenzhong); //写锟斤拷eeprom
+
+			Serial.println("压锟斤拷桶失效时水锟斤拷时锟斤拷锟借定锟缴癸拷");
+			edp_upload_string("锟斤拷锟斤拷锟斤拷", "锟斤拷锟斤拷值锟斤拷效锟斤拷压锟斤拷桶失效时水锟斤拷时锟斤拷锟借定锟缴癸拷");
+			// edp_upload_int("压锟斤拷桶失效锟斤拷锟绞憋拷锟????", yalitong_shuiman_fenzhong);
+			// upload_alert_standard(); //锟较憋拷锟斤拷锟斤拷锟斤拷准
+
+			// f_zhuang_tai("锟斤拷锟斤拷值锟斤拷效锟斤拷压锟斤拷桶失效时水锟斤拷时锟斤拷锟借定锟缴癸拷");
+			EEPROM.commit();
+			break;
+			/*-------------------------------------------锟斤拷锟斤拷锟斤拷锟????-------------------------*/
+		case 5: //0599
+			if ((buffer[1] == 46))
+			{
+				value = int(buffer[46] - 48) * 10; //Serial.println(value);
+				value = value + (int(buffer[47]) - 48);
+			}
+			if (value == 99)
+
+			{
+				chxu_update = true;
+				Serial.println("锟秸碉拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟????锟狡伙拷锟斤拷停锟斤拷状态锟铰革拷锟斤拷");
+				edp_upload_string("锟斤拷锟斤拷锟斤拷", "锟秸碉拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟????锟狡伙拷锟斤拷停锟斤拷状态锟铰革拷锟斤拷");
+			}
+
+			/*-------------------------------------------缺省锟斤拷锟斤拷------------------------------------------*/
+
+		default:
+			//edp_upload_string("锟斤拷锟斤拷锟斤拷", "锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷效");
+			break;
+		}
+	}
+}
+
+void Serial2_command_parse() //????????????
+{							 /*------------------------------????????????-------------------------------*/
+	if (buffer[0] == 0x0)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0x00");
+	}
+	if (buffer[0] == 0x02)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0x02");
+	}
+	if (buffer[0] == 0x03)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0x03");
+	}
+	if (buffer[0] == 0x04)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0x04");
+	}
+	if (buffer[0] == 0x05)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0x05");
+	}
+	if (buffer[0] == 0x11)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0x11");
+	}
+	if (buffer[0] == 0x12)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0x12");
+	}
+	//1A?????????????????閿熸枻锟??,?????????閿熸枻锟??????????
+	if (buffer[0] == 0x1A)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0x1A");
+	}
+	if (buffer[0] == 0x1B)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0X1B");
+	}
+	if (buffer[0] == 0x1C)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0X1C");
+	}
+	if (buffer[0] == 0x1D)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0X1D");
+	}
+	if (buffer[0] == 0x1E)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0X1E");
+	}
+	if (buffer[0] == 0x1F)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0X1F");
+	}
+	if (buffer[0] == 0x23)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0X23");
+	}
+	if (buffer[0] == 0x24)
+	{
+		Serial.print(order_sended);
+		Serial.println(": 0X24");
+	}
+
+	/*------------------------------获得页号-------------------------------*/
+	if (buffer[0] == 0x66) //
+	{
+		page = buffer[1]; //
+		tiaoshi("???" + (String)page);
+
+		Serial.print("page:");
+		Serial.println(page);
+		if (pre_page != page)
+		{
+			set_once = true; //鍥犱负椤靛澐涓濆潓锛屽厺璁镐紶閫濇暟锟??
+
+			pre_page = page;
+		}
+	}
+/*---------------------------锟??0鍧烽〉锛屽埌2鍧凤拷?锟界疆椤甸潰:-------------------------------*/
+	if (page == 0)
+	{
+		if (buffer[0] == 0x90)
+		{ xsp_shezhi=true;
+			Serial2.print("page 2"); //到设置页
+			for (int i = 0; i < 3;)
+			{
+				Serial2.write(0xff);
+				i++;
+			}     
+
+		}
+	}
+/*----------------------------锟??2鍧烽〉-锟??0鍧凤拷?锟界疆椤甸潰:-------------------------------*/
+if (page == 2)
+	{
+		if (buffer[0] == 0x98)
+		{
+			xsp_shezhi=false;
+			xianshiping_sendorder2("zhuangtai","涓插潱灞濆潅鏁帮拷?锟界疆瀹屾垵");
+			//edp_upload_string("鐘讹拷?","涓插潱灞濆潅鏁帮拷?锟界疆瀹屾垵");
+			Serial2.print("page 0"); //鍒帮拷?锟介〉
+			for (int i = 0; i < 3;)
+			{
+				Serial2.write(0xff);
+				i++;
+			}
+		}
+	}
+
+
+	/*-----------------------------3鍧疯秴婊わ拷?锟界疆椤甸潰:-------------------------------*/
+	if (page == 3)
+	{ if (buffer[0] == 0x90)
+		{
+			chaolv_chongxi_maichong_dixian = buffer[1];
+			EEPROM.writeByte(0, chaolv_chongxi_maichong_dixian); //0
+			eeprom_write = true;
+		}
+
+		if (buffer[0] == 0x91)
+		{
+			loushui_maich_biaozhun = buffer[1];
+			EEPROM.writeByte(2, loushui_maich_biaozhun); //
+			eeprom_write = true;
+		}
+
+		if (buffer[0] == 0x92)
+		{
+			chxi_cishu = buffer[1];
+			EEPROM.writeByte(4, chxi_cishu); //
+			eeprom_write = true;
+		}
+
+		if (buffer[0] == 0x93)
+		{
+			leiji_biaozhun = buffer[1]; //
+			EEPROM.writeByte(6, leiji_biaozhun);
+			eeprom_write = true;
+		}
+            if (buffer[0] == 0x98)
+		{Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
+			for (int i = 0; i < 3;)
+			{
+				Serial2.write(0xff);
+				i++;
+			}           
+		}
+	}
+	/*------------------------------4鍧烽〉锟??:璁剧疆鍒舵按鏈夊叧-----------------------------*/
+	if (page == 4)
+	{
+		if (buffer[0] == 0x90)
+		{
+			zhishuishijian_set = buffer[1];			  //
+			EEPROM.writeByte(50, zhishuishijian_set); //50
+
+			tiaoshi("??????????:" + (String)zhishuishijian_set);
+			eeprom_write = true;
+		}
+
+		if (buffer[0] == 0x91)
+		{
+			zhishui_maichong_biaozhun = buffer[1];
+			EEPROM.writeByte(52, zhishui_maichong_biaozhun); //52???
+			eeprom_write = true;
+		}
+
+		if (buffer[0] == 0x92)
+		{
+			chaoshi_cishu = buffer[1];
+			EEPROM.writeByte(54, chaoshi_cishu); //????54???
+			eeprom_write = true;
+		}
+		if (buffer[0] == 0x93)
+		{
+			shuimandengdaishijian_set = buffer[1]; //??43???
+			EEPROM.writeByte(56, shuimandengdaishijian_set);
+			eeprom_write = true;
+		}
+		if (buffer[0] == 0x98)
+		{Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
+			for (int i = 0; i < 3;)
+			{
+				Serial2.write(0xff);
+				i++;
+			}
+		}
+	}
+	/*-----------------------------5鍧烽〉锟??:娲楄啘璁剧疆------------------------------*/
+	if (page == 5)
+	{
+		if (buffer[0] == 0x90) //
+		{
+			jingshuiximo_shichang = buffer[1];
+			EEPROM.writeByte(100, jingshuiximo_shichang); //
+			eeprom_write = true;
+		}
+
+		if (buffer[0] == 0x91) //
+		{
+			ximo_shuiliu_jiance_cishu = buffer[1];
+			EEPROM.writeByte(102, ximo_shuiliu_jiance_cishu); //
+			eeprom_write = true;
+		}
+		if (buffer[0] == 0x92) //
+		{
+			moci_ximo_maichong_biaozhun = buffer[1];
+			EEPROM.writeByte(104, moci_ximo_maichong_biaozhun); //????51???
+			eeprom_write = true;
+		}
+		if (buffer[0] == 0x98)
+		{Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
+			for (int i = 0; i < 3;)
+			{
+				Serial2.write(0xff);
+				i++;
+			}
+		}
+	}
+	/*------------------------------13?????:wifi????-------------------------------*/
+
+	/*------------------------------7鍧蜂寒搴﹂〉闈?锟??锟界潌--------------------------------------*/
+	if (page == 7)
+	{
+		if (buffer[0] == 0x72)
+		{
+			//Serial.println("huo qu liang du");
+			brightness = buffer[1];
+			// p.putChar("brightness", brightness);
+		}
+		if (buffer[0] == 0x98)
+		{Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
+			for (int i = 0; i < 3;)
+			{
+				Serial2.write(0xff);
+				i++;
+			}
+		}
+	}
+	/*-----------------------------9鍧烽〉锟??:娓╁害璁″簼锟??----------------------------*/
+	if (eeprom_write == true)
+	{
+		tiaoshi("?閿熸枻锟?????");
+		if (EEPROM.commit())
+		{
+			tiaoshi("???閿熸枻锟????");
+			eeprom_write = false;
+		}
+		else
+		{
+			tiaoshi("閿熸枻锟???????");
+		}
+		if (buffer[0] == 0x98)
+
+		{Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
+			for (int i = 0; i < 3;)
+			{
+				Serial2.write(0xff);
+				i++;
+			}
+		}
+	}
+}
+
+
+
+
+void send_order() //锟斤拷锟斤拷锟斤拷锟筋，锟截达拷锟斤拷示锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷?
+{
+	/*-----------------------------3锟斤拷页锟斤拷:锟斤拷锟斤拷锟斤拷锟斤拷---------------------------------*/
+	if (page == 3)
+	{
+
+		if (set_once == true)
+		{
+
+			xianshiping_sendorder1("n0", chaolv_chongxi_maichong_dixian);
+			xianshiping_sendorder1("n1", loushui_maich_biaozhun);
+			xianshiping_sendorder1("n2", chxi_cishu);
+			xianshiping_sendorder1("n3", leiji_biaozhun);
+			set_once = false;
+		}
+	}
+	/*----------------------------4锟斤拷页锟斤拷:锟斤拷水锟斤拷锟斤拷-----------------------------*/
+	if (page == 4)
+	{
+		if (set_once == true)
+		{
+			xianshiping_sendorder1("n0", zhishuishijian_set);
+			xianshiping_sendorder1("n1", zhishui_maichong_biaozhun);
+			xianshiping_sendorder1("n2", chaoshi_cishu);
+			xianshiping_sendorder1("n3", shuimandengdaishijian_set);
+
+			set_once = false;
+		}
+	}
+	/*------------------------------5锟斤拷洗膜锟斤拷锟斤拷---------------------------------*/
+	if (page == 5)
+	{
+		if (set_once == true)
+		{
+			xianshiping_sendorder1("n0", jingshuiximo_shichang);
+			xianshiping_sendorder1("n1", ximo_shuiliu_jiance_cishu);
+			xianshiping_sendorder1("n2", moci_ximo_maichong_biaozhun);
+			// xianshiping_sendorder1("n3", dcf_chxi_shichang);
+			set_once = false;
+		}
+	}
+	/*-------------------------------11锟斤拷锟斤拷锟斤拷页锟芥处锟斤拷----------------------------------*/
+	if (page == 7)
+	{
+		if (set_once == true)
+		{
+
+			xianshiping_sendorder1("n0", brightness);
+			set_once = false;
+		}
+	}
+}
+void serial_print(byte *rcv, int len)
+{
+	int i;
+	Serial.print("jie shou:");
+	Serial.println(len, DEC);
+	for (i = 0; i < len; i++)
+	{
+		Serial.print(rcv[i], 16);
+		Serial.print(" ");
+	}
+	Serial.println("");
+}
+
+void chaolvchongxi()
+{	xianshiping_sendorder2("zhuangtai", "正在冲洗超滤"); //?????????? ???????????????
+	for (int i = 0; i < chxi_cishu; i++) //????趨??
+	{    
+		chaolvchongxi_zongcishu = chaolvchongxi_zongcishu + 1;
+		//String s = itoa(chaolvchongxi_zongcishu, str, 10);
+		EEPROM.writeULong(8, chaolvchongxi_zongcishu);  //?????????
+		//edp_upload_int(hz[0], chaolvchongxi_zongcishu); //超滤冲洗次数
+		if (EEPROM.commit())
+		{
+			tiaoshi("成功写入");
+		}
+		else
+		{
+			tiaoshi("写入失败");
+		}
+
+		xianshiping_sendorder2("shuju", "超滤冲洗次数：" + (String)chaolvchongxi_zongcishu);
+		delay(2000);
+		tiaoshi("chongxi chlv");
+		digitalWrite(zongjin,LOW);
+		digitalWrite(chaolv, HIGH); //????????
+
+		Serial.println(chaolvchongxi_zongcishu, DEC);
+
+		detect(1000); //?3??
+		delay(2000);
+		digitalWrite(zongjin,HIGH);         
+
+		xianshiping_sendorder2("shuju", "超滤冲洗脉冲数：" + (String)count);
+		//edp_upload_int(hz[1], count); //超滤冲洗脉冲数
+		delay(2000);
+		digitalWrite(chaolv, LOW);
+		//delay(8000); //??????
+		chaolv_chxi=false;//一定要置零
+	}
+}
+
+void eeprom_read()
+{
+	if (!EEPROM.begin(200))
+	{
+		Serial.println("failed to initialise EEPROM");
+		delay(1000000);
+	}
+
+	EEPROM.writeULong(60, 1); //?????????????
+
+	chaolv_chongxi_maichong_dixian = EEPROM.readByte(0); //超滤冲洗脉冲底限
+	loushui_maich_biaozhun = EEPROM.readByte(2);		 //超滤漏水脉冲标准
+	chxi_cishu = EEPROM.readByte(4);					 //单回超滤冲洗次数
+	leiji_biaozhun = EEPROM.readByte(6);				 //制水累计多长时间冲洗一次超滤
+	chaolvchongxi_zongcishu = EEPROM.readULong(8);		 //总次数
+	// tiaoshi("?????????" + (String)chaolvchongxi_zongcishu);
+
+	zhishuishijian_set = EEPROM.readByte(50); //单次制水限时,50
+	tiaoshi("制水限时：" + (String)zhishuishijian_set);
+	zhishui_maichong_biaozhun = EEPROM.readByte(52); //制水时最小脉冲数,52
+													 // tiaoshi("???????????" + (String)zhishui_maichong_biaozhun);
+	chaoshi_cishu = EEPROM.readByte(54);			 //制水时允许的超时次数
+	shuimandengdaishijian_set = EEPROM.readByte(56); //净水电磁阀关闭后的水满等待时间 56
+	zhishuizongshijian = EEPROM.readULong(60);		 //制水总时间   从60地址开始存放制水总时间,占4个字节
+	tiaoshi("?????????" + (String)zhishuizongshijian);
+
+	jingshuiximo_shichang = EEPROM.readByte(100);		//净水洗膜时长
+	ximo_shuiliu_jiance_cishu = EEPROM.readByte(102);   //洗膜水流检测次数 102
+	moci_ximo_maichong_biaozhun = EEPROM.readByte(104); //洗膜末次脉冲标准，低于此值认为气囊失效 104
+	guanbi = EEPROM.readBool(106);//远程关闭设定
+}
+
+void print_reset_reason(RESET_REASON reason)
+{
+  switch ( reason)
+  {
+    case 1 : Serial.println ("POWERON_RESET");
+	        reason1= "Vbat power on reset";    break;                    /**<1,  Vbat power on reset*/
+    case 3 : Serial.println ("SW_RESET");
+	        reason1= "Software reset digital core";      break;          /**<3,  Software reset digital core*/
+    case 4 : Serial.println ("OWDT_RESET");
+	     reason1="Legacy watch dog reset digital core";    break;         /**<4,  Legacy watch dog reset digital core*/
+    case 5 : Serial.println ("DEEPSLEEP_RESET");
+	         reason1="Deep Sleep reset digital core";      break;        /**<5,  Deep Sleep reset digital core*/
+    case 6 : Serial.println ("SDIO_RESET"); 
+	 reason1="Reset by SLC module, reset digital core";
+	                                                      break;         /**<6,  Reset by SLC module, reset digital core*/
+    case 7 : Serial.println ("TG0WDT_SYS_RESET"); 
+	 reason1="Timer Group0 Watch dog reset digital core"; 
+	                                                        break;       /**<7,  Timer Group0 Watch dog reset digital core*/
+    case 8 : Serial.println ("TG1WDT_SYS_RESET"); 
+	 reason1="Timer Group1 Watch dog reset digital core"; 
+	                                                   break;                /**<8,  Timer Group1 Watch dog reset digital core*/
+    case 9 : Serial.println ("RTCWDT_SYS_RESET"); 
+	 reason1="RTC Watch dog Reset digital core";       break;                 /**<9,  RTC Watch dog Reset digital core*/
+    case 10 : Serial.println ("INTRUSION_RESET");
+	  reason1="Instrusion tested to reset CPU";  break;                      /**<10, Instrusion tested to reset CPU*/
+    case 11 : Serial.println ("TGWDT_CPU_RESET"); 
+	 reason1=" Time Group reset CPU";  break;                                  /**<11, Time Group reset CPU*/
+    case 12 : Serial.println ("SW_CPU_RESET"); 
+	 reason1="Software reset CPU";             break;                       /**<12, Software reset CPU*/
+    case 13 : Serial.println ("RTCWDT_CPU_RESET"); 
+	 reason1="RTC Watch dog Reset CPU";  break;                      	    /**<13, RTC Watch dog Reset CPU*/
+    case 14 : Serial.println ("EXT_CPU_RESET"); 
+	 reason1="for APP CPU reseted by PRO CPU";  break;                    /**<14, for APP CPU, reseted by PRO CPU*/
+    case 15 : Serial.println ("RTCWDT_BROWN_OUT_RESET"); 
+	 reason1="Reset when the vdd voltage is not stable";  break;           /**<15, Reset when the vdd voltage is not stable*/
+    case 16 : Serial.println ("RTCWDT_RTC_RESET");
+	  reason1="RTC Watch dog reset digital core and rtc module";  break;      /**<16, RTC Watch dog reset digital core and rtc module*/
+    default : Serial.println ("NO_MEAN");reason1="NO_MEAN";
+  }
+}
+
+void verbose_print_reset_reason(RESET_REASON reason)
+{
+  switch ( reason)
+  {
+    case 1  : Serial.println ("Vbat power on reset");
+	    reason2="Vbat power on reset";      break; 
+    case 3  : Serial.println ("Software reset digital core"); 
+	reason2="Software reset digital core"; break;
+    case 4  : Serial.println ("Legacy watch dog reset digital core");
+	 reason2="Legacy watch dog reset digital core"; break;
+    case 5  : Serial.println ("Deep Sleep reset digital core");
+	 reason2="Deep Sleep reset digital core"; break;
+    case 6  : Serial.println ("Reset by SLC module, reset digital core");
+	 reason2="Reset by SLC module, reset digital core"; break;
+    case 7  : Serial.println ("Timer Group0 Watch dog reset digital core"); 
+	reason2="Timer Group0 Watch dog reset digital core"; break;
+    case 8  : Serial.println ("Timer Group1 Watch dog reset digital core"); 
+	reason2="Timer Group1 Watch dog reset digital core"; break;
+    case 9  : Serial.println ("RTC Watch dog Reset digital core"); 
+	reason2="RTC Watch dog Reset digital core"; break;
+    case 10 : Serial.println ("Instrusion tested to reset CPU");
+	 reason2="Instrusion tested to reset CPU"; break;
+    case 11 : Serial.println ("Time Group reset CPU"); 
+	reason2="Time Group reset CPU"; break;
+    case 12 : Serial.println ("Software reset CPU");
+	 reason2="Software reset CPU"; break;
+    case 13 : Serial.println ("RTC Watch dog Reset CPU");
+	 reason2="RTC Watch dog Reset CPU"; break;
+    case 14 : Serial.println ("for APP CPU reseted by PRO CPU"); 
+	reason2="for APP CPU, reseted by PRO CPU"; break;
+    case 15 : Serial.println ("Reset when the vdd voltage is not stable");
+	 reason2="Reset when the vdd voltage is not stable"; break;
+    case 16 : Serial.println ("RTC Watch dog reset digital core and rtc module");
+	 reason2="RTC Watch dog reset digital core and rtc module"; break;
+    default : Serial.println ("NO_MEAN"); reason2="NO_MEAN"; 
+  }
+}
