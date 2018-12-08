@@ -1,0 +1,118 @@
+
+#include <Chrono.h>
+#include <LightChrono.h>
+#include <AsciiMassage.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include "EdpKit.h"
+#include <OneWire.h>
+#include <DallasTemperature.h>
+
+
+/*extern作用
+作用1，当与“C”一起使用时，如 extern "C" void fun(int a, int b)，则编译器中fun这个函数名按照c语言规则命名，而不是用c++规定命名。故C++中可以利用该法则调用c函数
+作用2，当他不与“C"在一起修饰变量或者函数时，如在头文件中，extern int g_Num；其作用就是声明函数或者变量的作用范围的关键字，其声明的函数和变量可以在本编译单元或者其他编译单元使用
+ 
+/*--------------------------------输入与输出------------------------------------------*/
+extern  int diyakg, ximo_gaoyakg , yinyong_gaoyakg , shengchan_gaoyakg, jingshui_chaoyakg, shuiliu_chuanganqi;//输入
+extern int chaolv, jingshui, zongjin, gaoyabeng , youxian , jiare,mo_jinshui,chongxi;//输出
+
+/* ---------------------------------------edp-----------------------------------------*/
+
+extern bool wifi_connected;
+extern unsigned int version;
+extern bool chxu_update ;
+extern const char *edp_server ;
+extern unsigned int edp_port ;
+extern bool edpConnected;
+extern const char *apikey,*device_id ;
+extern unsigned char edp_buffer[];	//???????
+extern Chrono ch_xintiao; //定期发送心跳信号
+extern unsigned long guanbi_dingshi;	 //???????????????????????
+extern WiFiClient edp_client;			  //
+extern EdpPacketClass edp;				  //????EDP????
+//extern unsigned char packettype;
+
+/*------------------------------------------------------wifi------------------------------------------------ */
+
+//const char *ssid = "";
+//const char *password = "";
+extern  IPAddress ip;
+extern   IPAddress gateway;
+ extern IPAddress subnet;
+ extern String former_wifi_ssid, wifi_ssid , former_wifi_pass, wifi_pass;
+//bool you_fangwen=false;
+ extern int wifi_disconnect_count, edp_disconnect_count;
+/*--------------------------------水流传感器-------------------------------------------*/
+ extern volatile int count; //????????????????
+
+ /*--------------------------------超滤-------------------------------------------*/
+ extern byte chaolv_chongxi_maichong_dixian ;
+extern  byte loushui_maich_biaozhun ;
+//unsigned int chaolvchongxi_zongcishu = 0; /*??????????*/
+extern  unsigned long accumulative ; /*?????????*/
+extern  byte chxi_cishu ;			//?????????????
+extern  byte leiji_biaozhun ;
+extern  bool chaolv_chxi , loushui_bool ; //?????????????
+extern  unsigned long chaolvchongxi_zongcishu;
+extern Chrono ch_chaolv_dcf;//检查超滤电磁阀漏水
+/*--------------------------------调试-------------------------------------------*/
+extern bool tiaoshikg ;
+/*--------------------------------显示屏串口-------------------------------------------*/
+extern  byte buffer[200]; //??????????
+extern unsigned int buffer_index ;
+extern  byte brightness ; //???????50
+extern bool set_once ; //???????????
+extern  byte page ;		  //???0?????
+extern byte pre_page ;   //???????????锟斤拷???????
+extern String pre_kongjian, pre_text;
+//byte ff_starter = 0;
+//  byte terminator ; //?????????
+extern bool parse_ready ;
+extern  bool eeprom_write ;
+extern  bool xsp_shezhi ;
+extern  String order_sended ; 
+extern Chrono    xianshi_jiange;
+extern Chrono  yinyong_shuiman_xianshi_jiange,shch_shuiman_xianshi_jiange;
+/*--------------------------------制水-------------------------------------------*/
+extern bool guanbi ;			  //远程控制 true关机 false运行
+extern  byte zhishuishijian_set ;	 //?????????50?????255????
+extern  unsigned long zhishuizongshijian; //
+extern  byte zhishui_zong_add ;
+extern  byte zhishui_dan_add ;
+extern  byte xianshi;
+extern  bool yinyong_zhishui , shchan_zhishui ;
+extern  byte shuimandengdaishijian_set ; //??????????????????? 6?????
+
+extern  byte zhishui_maichong_biaozhun ;
+extern bool xuyao_beng_shijian;
+extern  byte chaoshi_cishu ; /*????2?锟斤拷???????????*/
+extern  byte feishuiguoshao_times ;
+extern unsigned long zhishui_starttime , zhishui_endtime;
+extern Chrono ch_beng;
+/*--------------------------------洗膜-------------------------------------------*/
+extern  byte jingshuiximo_shichang; //?????6????,??锟斤拷????
+extern bool xuyao_ximo ;
+extern byte moci_ximo_maichong_biaozhun , ximo_shuiliu_jiance_cishu ;
+//byte dcf_chxi_shichang = 40; //??????????????
+extern Chrono ch_ximo;
+/*--------------------------------报警-------------------------------------------*/
+//String state = ""; //??????
+
+extern  bool jingshui_chaoya , feishuiguoshao , alarm1 ;
+extern Chrono ch_xianshi_guanji_jiange;
+extern Chrono ch_alarm;
+extern unsigned long begintime , endtime;
+
+/*-------------------------------启动原因------------------------------------------*/
+extern  String reason1,reason2;
+/*-------------------------------udp------------------------------------------*/
+extern  WiFiUDP udp;
+extern  AsciiMassagePacker outbound;
+extern Chrono sendMassageChrono;
+/*-------------------------------温度------------------------------------------*/
+extern Chrono ch_wendu;
+
+
+
+
