@@ -1,0 +1,387 @@
+
+#include "EEPROM.h"
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
+bool tiaoshikg=true;
+/* --------------------------------------wifi--------------------------------------*/
+const char *ssid = "lydwifi";
+const char *password = "19711128";
+
+int wifi_disconnect_count = 0, edp_disconnect_count = 0;
+WiFiUDP udp;
+/* --------------------------------------udp---------------------------------------*/
+#define BUFFER_LENGTH 64
+char receivedString[BUFFER_LENGTH];
+String state = "";
+unsigned long receive_time = 0;
+unsigned long send_time = 0;
+int chongqi = 33;
+/* ---------------------------------------edp-----------------------------------------*/
+bool wifi_connected = false;
+unsigned int version = 20181215;
+bool chxu_update = false;
+const char *edp_server = "jjfaedp.hedevice.com";
+unsigned int edp_port = 876;
+bool edpConnected = false;
+const char *apikey = "DtqP1ueccp3al7g9ey86QPx4mmU=", *device_id = "507317604";
+unsigned char edp_buffer[200];	//???????
+//Chrono ch_xintiao; //定期发送心跳信号
+unsigned long xintiao_jiange=0;	 //???????????????????????
+WiFiClient edp_client;			  //
+EdpPacketClass edp;				  //????EDP????
+//unsigned char packettype;
+
+
+
+
+void tiaoshi(String pingmuxianshi)
+{
+
+	if (tiaoshikg == true)
+	{
+
+		Serial.println(pingmuxianshi);
+	}
+}
+
+void rcvDebug(unsigned char *rcv, int len)
+{
+	int i;
+
+	Serial.print("edp接收的数据");
+	Serial.println(len, DEC);
+	for (i = 0; i < len; i++)
+	{
+		Serial.print(rcv[i], 10);
+		Serial.print(" ");
+	}
+	Serial.println("");
+}
+void edp_first_connect()
+{
+	if (WiFi.status() == WL_CONNECTED) //WiFi连接成功
+	{
+		if (wifi_client_connect() == true) //WiFi连接到网站成功
+		{
+			edp.PacketConnect1(device_id, apikey);
+			edp_packet_send();
+			edp.ClearParameter();
+			//edp_reponse(1);
+		}
+	}
+}
+void edp_packet_send()
+{ //发送前清空客户端数据
+	while (edp_client.available())
+	{
+		edp_client.read();
+	}
+	if (!edp_client.connected())
+	{
+		edp_client.connect(edp_server, edp_port);
+		Serial.print("连接到物联网：");
+		Serial.println((String)edp_server);
+	}
+	if (edp_client.connected())
+	{
+		edp_client.write(edp.GetData(), edp.GetWritepos());
+	}
+}
+void edp_heartbeat()
+{
+	//ESP.wdtFeed();
+	if (WiFi.status() == WL_CONNECTED) //WiFi连接状态
+	{
+		if (wifi_client_connect() == true) //WiFi连接到网站成功
+		{
+			edp.PacketPing(); //请求是：192 0  0xC0 0
+			if (tiaoshikg == true)
+			{
+				rcvDebug(edp.GetData(), edp.GetWritepos());
+			}
+
+			edp_packet_send();
+			//Serial.println("?????????????");
+			edp.ClearParameter();
+			//edp_reponse(2); //判断心跳返回是否成功
+		}
+		else
+		{
+			edpConnected = false; //先置假
+			edp_first_connect();  //
+		}
+	}
+	else
+	{
+		edpConnected = false;
+	}
+}
+
+bool wifi_client_connect() //检查到物联网服务器连接状态
+{
+	if (!edp_client.connected())
+	{
+		if (WiFi.status() == WL_CONNECTED)
+		{
+			edp_client.connect(edp_server, edp_port);
+			Serial.print("连接到：");
+			Serial.println((String)edp_server);
+		}
+
+		if (edp_client.connected())
+		{ // ld.print("edp1succ",0);//04 edp服务器 连接  01:成功
+			return true;
+			//xianshiping_sendorder2("zhuangtai", "连接到物联网服务器正常");
+            tiaoshi("连接到物联网服务器正常");
+		}
+		else
+		{ //ld.print("edp1fail",0);//04 edp服务器 连接  01:成功
+			//xianshiping_sendorder2("zhuangtai", "连接到物联网服务器失败");
+            tiaoshi("连接到物联网服务器失败");
+			return false;
+		}
+	}
+	else //连接状态
+	{
+		tiaoshi("连接到物联网服务器正常");
+		return true;
+	}
+}
+
+
+void edp_upload_string(String data_stream_id, String datapoint)
+{
+	if (edpConnected == true)
+	{
+
+		//ESP.wdtFeed();
+		//Serial.println("锟较达拷锟斤拷一锟斤拷锟街凤拷锟斤拷");
+
+		String input = ",;";
+		input += data_stream_id + ",";
+		input += datapoint; //锟斤拷确锟斤拷式
+
+		//EdpPacket*	edp = NewBuffer();
+
+		edp.PacketSavedataSimpleString(device_id, input.c_str());
+		edp_packet_send();
+		while (edp_client.available())
+		{
+			edp_client.read();
+		} //锟斤拷锟斤拷锟秸存储确锟斤拷
+
+		//DeleteBuffer(&edp);
+		edp.ClearParameter();
+	}
+}
+
+void edp_command_parse() //解析物联网返回的数据
+{
+	int byte_count = edp_client.available();
+	//memset(buffer, 0, 200);
+	if (byte_count > 0) //??????
+	{
+		//buffer=   client.readBytesUntil('\r')
+		for (int e = 0; e < byte_count; e++)
+		{ //edp.UnpackConnectResp=edp_client.read();
+			edp_buffer[e] = edp_client.read();
+			if (edp_buffer[e] == 128 || edp_buffer[e] == 230 || edp_buffer[e] == 129 || edp_buffer[e] == 138) //返回的确认信息
+			{
+				return;
+			}
+		}
+
+		//0x20 0x02 0x0 0x0  32 0 0
+
+		if (edp_buffer[0] == 0x20 && edp_buffer[2] == 0x00 && edp_buffer[3] == 0x00)
+		{
+			rcvDebug(edp_buffer, byte_count);
+			Serial.println("EDP连接成功");
+			edpConnected = true;
+			edp_disconnect_count = 0;
+			//ld.print("edp2succ", 0);
+			//edp_upload_string("wifi", "wifi??????????");
+		}
+
+		//返回应该是：208 0   0xD0 0
+
+		else if (edp_buffer[0] == 0xD0 && edp_buffer[1] == 0x0)
+		{
+			rcvDebug(edp_buffer, byte_count);
+			edpConnected = true;
+			edp_disconnect_count = 0;						//??????????
+			edp_upload_string("heart beat", "received ok"); //
+			tiaoshi("EDP心跳成功接收返回数据");
+			//ld.print("hbt succ", 0);
+			//f_zhuang_tai("???????????????????????");
+		}  
+      
+        
+	}
+}
+
+void edp_upload_int(String data_stream_id, int datapoint) //锟较达拷WiFi锟脚猴拷强锟斤拷锟角革拷值
+{
+	if (edpConnected == true)
+	{
+
+		//ESP.wdtFeed();
+		//Serial.println("锟较达拷锟斤拷一锟斤拷锟斤拷锟斤拷");
+		String input = "{\"" + data_stream_id + "\":" + datapoint + "}\"";
+
+		cJSON *cj = cJSON_Parse(input.c_str());
+
+		edp.PacketSavedataJson("", cj, 3, 0);
+		edp_packet_send();
+		cJSON_Delete(cj); //锟斤拷锟斤拷锟缴撅拷锟斤拷锟絥odemcu锟斤拷锟斤拷锟斤拷
+		while (edp_client.available())
+		{
+			edp_client.read();
+		} //锟斤拷锟斤拷锟秸存储确锟斤拷
+		edp.ClearParameter();
+	}
+}
+void check_wifi() //锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷
+{
+	if (WiFi.status() != WL_CONNECTED)
+	{
+		WiFi.begin(ssid, password);
+	}
+	if ((WiFi.status() != WL_CONNECTED)) //重新连接后
+	{									 // ld.print("wifi fail",0);
+		//xianshiping_sendorder2("zhuangtai", "wifi重新连接失败");
+
+		wifi_disconnect_count++; //WiFi失败次数加1
+
+		tiaoshi("wifi重新连接失败");
+	}
+	else						   //WiFi重新连接成功
+	{							   // ld.print("OIFI succ",0);//
+		wifi_disconnect_count = 0; //WiFi失败次数置零
+		tiaoshi("wifi连接正常");
+		//xianshiping_sendorder2("zhuangtai", "wifi连接正常");
+	}
+}
+
+
+
+void setup()
+{
+    Serial.begin(9600);
+
+    // [START] BEGIN WIFI
+    //WiFi.config(ip , gateway , subnet );
+    WiFi.begin(ssid, password);
+    pinMode(chongqi, OUTPUT);
+    digitalWrite(chongqi, LOW);
+    if (WiFi.status() != WL_CONNECTED)
+    {
+        for (int i = 0; i < 20;)
+        {
+            delay(500);
+            Serial.print(".");
+            i++;
+        }
+    }
+    if (WiFi.status() == WL_CONNECTED)
+    {
+        Serial.println("");
+        Serial.print("Connected to ");
+        Serial.println(ssid);
+        Serial.print("IP address: ");
+        Serial.println(WiFi.localIP());
+        edp_first_connect();   
+        udp.begin(WiFi.localIP(), 7777); // BEGIN LISTENING ON UDP PORT 7777.
+
+    }
+}
+
+void loop()
+{//没有wifi，没有连接服务器，不用进入   /*------------------------------------edp接收命令------------------------------------------------*/
+	if (WiFi.status() == WL_CONNECTED && edp_client.connected() == true)
+	{
+		while (edp_client.available()) //有数据
+		{
+			//tiaoshi("接收到edp数据");
+			edp_command_parse(); //解析返回数据
+		}
+	}
+
+
+    
+	/*------------------------------------定时心跳和wifi检查------------------------------------------*/
+
+	if (millis() - xintiao_jiange > 180000)
+	{
+		xintiao_jiange = millis();
+		edpConnected = false; //定期先置零，心跳后成功置真
+		check_wifi();
+		//delay(1500); //为了led显示wifi
+		//tiaoshi("检查WiFi");
+		wifi_client_connect();
+		//delay(1500); //为了显示是否连接到edp服务器
+		//tiaoshi("检查WiFi是否连接到物联网站");
+		edp_heartbeat(); //可以确定edp是否连接状态
+		if (edpConnected == false)
+		{  Serial.println("物联网断网");
+			//ld.print("hbt fail", 0);
+			//add_message();
+			//xianshiping_sendorder2("zhuangtai", );
+		}
+		else
+		{Serial.println("心跳信号返回正常，物联网正常");
+			//add_message("心跳信号返回正常，物联网正常");
+			//xianshiping_sendorder2("zhuangtai", );
+		}
+	}
+
+    if (udp.parsePacket())
+    {
+        Serial.println("found data");
+        if (udp.available())
+        {
+            Serial.println("available");
+            while (udp.available())
+            {
+                state = udp.readString();
+            }
+            Serial.println(state);
+            if (state == "ok")
+            {
+                Serial.println("received ok");
+                edp_upload_int("接收ok",20);
+                 edp_upload_int("重启对方",0);
+                receive_time = millis();
+                state = "";
+                // [END] AN UDP PACKET WAS RECEIVED
+            }
+        }
+    }
+
+     if ((millis() - receive_time) > 35000)
+    {
+        digitalWrite(chongqi, HIGH);
+        delay(4000);
+        digitalWrite(chongqi, LOW);
+        Serial.println("reset onetime");
+         edp_upload_int("接收ok",0);
+        edp_upload_int("重启对方",20);
+        receive_time= millis() ; //加上重启等待
+       
+    }
+
+    if (millis() - send_time > 20000)
+    {
+        IPAddress targetIp = IPAddress(192, 168, 2, 255); //?????
+        int targetPort = 3333;
+        udp.beginPacket(targetIp, targetPort);
+        udp.print("ok");
+        udp.endPacket();
+        edp_upload_int("发送ok",20);
+        Serial.println("have sended ok");
+        send_time=millis();
+    }
+
+   
+}
