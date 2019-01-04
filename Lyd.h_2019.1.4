@@ -1,0 +1,60 @@
+#include <rom/rtc.h>
+void add_message(String message);
+
+void closeall() ;/**/
+
+void tiaoshi(String pingmuxianshi);
+
+void chaolvchongxi();
+
+void check_wifi();
+
+void count_function();
+
+void detect(unsigned long yongshi); 
+
+void decide_chaolv_chxi(unsigned long long1);
+
+void display_message();
+
+void edp_command_parse();
+
+void edp_first_connect();
+
+void edp_heartbeat();
+
+void edp_packet_send(unsigned char *buff,unsigned int size );
+
+void edp_upload_int(const char *data_stream_id, int datapoint);
+
+void edp_upload_string(const char *data_stream_id, const char *datapoint);
+
+//void http_ota();
+void eeprom_read();
+
+void get_bin_version();
+String getHeaderValue(String header, String headerName);
+
+void ota();
+
+void print_reset_reason(RESET_REASON reason);//启动原因
+
+void rcvDebug(unsigned char *rcv, int len);
+
+void send_order() ;
+
+void Serial2_command_parse();
+
+void serial_print(byte *rcv, int len);
+ void tds_send_parse();
+
+
+void verbose_print_reset_reason(RESET_REASON reason);
+
+void xianshiping_sendorder1(String kongjian, int value) ;
+
+void xianshiping_sendorder2(String kongjian, String text) ;
+
+void udp_sendok();
+
+bool wifi_client_connect();//测试到物联网站是否连接状态
