@@ -19,10 +19,7 @@
 /*--------------------------------温度-------------------------------------------*/
 OneWire oneWire(19); //d19
 DallasTemperature sensors(&oneWire);
-DeviceAddress address_18b20;
-
-//char str[10];
-    
+DeviceAddress address_18b20;    
 
 void setup()
 { 
@@ -859,10 +856,9 @@ void loop()
 
 									if (count < zhishui_maichong_biaozhun)
 									{
-										feishuiguoshao_times++;
-										String tt = itoa(feishuiguoshao_times, str, 10);
+										feishuiguoshao_times++;									
 
-										xianshiping_sendorder2("zhuangtai", "废水过少:" + tt + "次");
+										xianshiping_sendorder2("zhuangtai", "废水过少:" + (String)feishuiguoshao_times + "次");
 									}
 									else
 									{
