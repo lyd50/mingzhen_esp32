@@ -1,312 +1,118 @@
-#include <Arduino.h>
-#include "canshu.h"
-#include "EEPROM.h"
-//#include "hz.h"
-#define EEPROM_SIZE 200
-#include <rom/rtc.h>
 #include "EdpKit.h"
-#include "c:/hz.c"
+#include "EEPROM.h"
+#include <Arduino.h>
+#include <WiFi.h>
+#include <WiFiUdp.h>
 #include <esp_task_wdt.h>
-#include <Update.h>
+#include <HttpClient.h>
 #include <ArduinoJson.h>
-#include "Lyd.h"
 
-void add_message(String message)
+#include <Update.h>
+bool tiaoshikg = true;
+/* --------------------------------------wifi--------------------------------------*/
+const char *ssid = "lydwifi";
+const char *password = "19711128";
+
+byte wifi_disconnect_count = 0;
+WiFiUDP udp;
+/* --------------------------------------udp---------------------------------------*/
+#define BUFFER_LENGTH 64
+char receivedString[BUFFER_LENGTH];
+String state = "";
+unsigned long receive_time = 0;
+unsigned long send_time = 0;
+int chongqi = 32;
+byte edp_disconnect_count = 0;
+/* ---------------------------------------edp-----------------------------------------*/
+bool wifi_connected = false;
+
+bool chxu_update = false;
+const char *edp_server = "jjfaedp.hedevice.com";
+unsigned int edp_port = 876;
+bool edpConnected = false;
+const char *apikey = "DtqP1ueccp3al7g9ey86QPx4mmU=", *device_id = "507317604";
+unsigned char edp_buffer[200]; //???????
+unsigned int edp_buffer_index=0;
+
+unsigned long xintiao_jiange = 0; //???????????????????????
+WiFiClient edp_client;			  //
+
+unsigned long hb_send, hb_received, hb_confirm_jiange;
+bool hb_confirm = false;
+/* --------------------重启----------------------------------*/
+bool send_reset = false;
+/*-------------------------------ota更新--------------------------------------*/
+WiFiClient update_client;
+const char *edp_host = "api.heclouds.com";
+HttpClient http_client = HttpClient(update_client, edp_host, 80);
+//unsigned long update_jiange=0;
+
+const char *update_host = "lyd50.vicp.io";
+String bin = ""; // bin file name with a slash in front.
+int contentLength = 0;
+bool isValidContentType = false;
+unsigned long version = 0, version_latest = 0;
+DynamicJsonDocument doc(800);
+//int status = WL_IDLE_STATUS;
+String response;
+int statusCode = 0;
+String update_message[10];
+bool to_send_update_message = false;
+
+void tiaoshi(String pingmuxianshi)
 {
-	for (int i = 0; i < 10; i++)
+
+	if (tiaoshikg == true)
 	{
-		if (message_todisplay[i] == "")
-		{
-			message_todisplay[i] = message;
-			break;
-		}
+
+		Serial.println(pingmuxianshi);
 	}
 }
 
-void  add_update_message(String message)
-{	for (int i = 0; i < 10; i++)
-	{
-		if (message_todisplay[i] == "")
-		{
-			message_todisplay[i] = message;
-			break;
-		}
-	}
-}
-
-void chaolvchongxi()
+void rcvDebug(unsigned char *rcv, int len)
 {
-	xianshiping_sendorder2("zhuangtai", "正在冲洗超滤"); //?????????? ???????????????
-	for (int i = 0; i < chxi_cishu; i++)				 //????趨??
+	int i;
+
+	Serial.print("edp接收的数�??");
+	Serial.println(len, DEC);
+	for (i = 0; i < len; i++)
 	{
-		esp_task_wdt_feed();
-		chaolvchongxi_zongcishu = chaolvchongxi_zongcishu + 1;
-		//String s = itoa(chaolvchongxi_zongcishu, str, 10);
-		EEPROM.writeULong(8, chaolvchongxi_zongcishu); //?????????
-		//edp_upload_int(hz[0], chaolvchongxi_zongcishu); //超滤冲洗次数
-
-		xianshiping_sendorder2("shuju", "超滤冲洗次数：" + (String)chaolvchongxi_zongcishu);
-		//delay(1500);
-		tiaoshi("chongxi chlv");
-		//digitalWrite(zongjin, LOW);
-		digitalWrite(chaolv, HIGH); //????????
-
-		Serial.println(chaolvchongxi_zongcishu, DEC);
-
-		detect(500); //?3??
-		//delay(2000);
-		//digitalWrite(zongjin, HIGH);
-
-		xianshiping_sendorder2("shuju", "超滤冲洗脉冲数：" + (String)count);
-		//edp_upload_int(hz[1], count); //超滤冲洗脉冲数
-		delay(4000);
-		digitalWrite(chaolv, LOW);
-		delay(4000); //??????
-		esp_task_wdt_feed();
+		Serial.print(rcv[i], 10);
+		Serial.print(" ");
 	}
-	chaolv_chxi = false; //一定要置零
-	if (EEPROM.commit())
-	{
-		tiaoshi("成功写入");
-	}
-	else
-	{
-		tiaoshi("写入失败");
-	}
-}
-void count_function()
-{
-	count++;
-	delay(3);
-}
-void check_wifi() //是否wifi连接
-{
-	if (WiFi.status() != WL_CONNECTED)
-	{  esp_task_wdt_feed();
-		WiFi.begin(wifi_ssid.c_str(), wifi_pass.c_str());
-		for (int i = 0; i < 25;)
-		{
-			delay(500);
-			Serial.print(".");
-			i++;
-		}
-	}
-	if ((WiFi.status() != WL_CONNECTED)) //重新连接后
-	{									 // ld.print("wifi fail",0);
-		xianshiping_sendorder2("zhuangtai", "wifi重新连接失败");
-
-		wifi_disconnect_count++; //WiFi失败次数加1
-
-		tiaoshi("wifi重新连接失败");
-	}
-	else						   //WiFi重新连接成功
-	{							   // ld.print("OIFI succ",0);//
-		wifi_disconnect_count = 0; //WiFi失败次数置零
-		tiaoshi("wifi连接正常");
-		xianshiping_sendorder2("zhuangtai", "wifi连接正常");
-	}
-
-	if (wifi_disconnect_count > 10)
-	{
-		ESP.restart();
-	}
-}
-void closeall() /*?????????*/
-{
-	digitalWrite(chaolv, LOW);
-	digitalWrite(mo_jinshui, LOW); //????
-	//digitalWrite(chongxi, LOW);	//????
-	digitalWrite(jingshui, LOW);
-	digitalWrite(gaoyabeng, LOW);
-	//digitalWrite(zongjin, LOW);
-	digitalWrite(youxian, LOW);
-	//digitalWrite(jiare, LOW);
-}
-void display_message() //交替显示
-{
-	for (int i = 0; i < 10; i++)
-	{
-		if (message_todisplay[i] != "")
-		{
-			if (at_zhuangtai == false)
-			{
-				xianshiping_sendorder2("zhuangtai", message_todisplay[i]);
-				at_zhuangtai = true;
-				at_shuju = false;
-				message_todisplay[i] = ""; //清空
-				delay(1500);
-				break;
-			}
-
-			if (at_shuju == false)
-			{
-				xianshiping_sendorder2("shuju", message_todisplay[i]);
-				at_zhuangtai = false;
-				at_shuju = true;
-				message_todisplay[i] = ""; //清空
-				delay(1500);
-				break;
-			}
-		}
-	}
-}
-
-void decide_chaolv_chxi(unsigned long long1)
-{
-	//zhishuizongshijian = zhishuizongshijian + long1;
-	//EEPROM.writeLong(3, zhishuizongshijian);
-
-	accumulative = accumulative + long1;
-
-	if (accumulative > leiji_biaozhun * 60000)
-	{
-		chaolv_chxi = true;
-		accumulative = 0;
-	}
-}
-void detect(unsigned long yongshi) /*???????,??锟斤拷????*/
-{
-	count = 0; /*????????????,???????*/
-	unsigned long begintime2 = millis();
-	unsigned long endtime2;
-	attachInterrupt(digitalPinToInterrupt(shuiliu_chuanganqi), count_function, RISING);
-	do
-	{
-		endtime2 = millis();
-	} while (endtime2 - begintime2 < yongshi);
-
-	detachInterrupt(digitalPinToInterrupt(shuiliu_chuanganqi));
-}
-
-void eeprom_read()
-{
-	if (!EEPROM.begin(EEPROM_SIZE))
-	{
-		Serial.println("failed to initialise EEPROM");
-		delay(1000000);
-	}
-
-	chaolv_chongxi_maichong_dixian = EEPROM.readByte(0); //超滤冲洗脉冲底限
-	loushui_maich_biaozhun = EEPROM.readByte(2);		 //超滤漏水脉冲标准
-	//chxi_cishu = EEPROM.readByte(4);					 //单回超滤冲洗次数
-	leiji_biaozhun = EEPROM.readByte(6);		   //制水累计多长时间冲洗一次超滤
-	chaolvchongxi_zongcishu = EEPROM.readULong(8); //超滤冲洗总次数
-	// tiaoshi("?????????" + (String)chaolvchongxi_zongcishu);
-
-	zhishuishijian_set = EEPROM.readByte(50); //单次制水限时,50
-	tiaoshi("制水限时：" + (String)zhishuishijian_set);
-	zhishui_maichong_biaozhun = 60;					 //EEPROM.readByte(52); //制水时最小脉冲数,52
-													 // tiaoshi("???????????" + (String)zhishui_maichong_biaozhun);
-	chaoshi_cishu = EEPROM.readByte(54);			 //制水时允许的超时次数
-	shuimandengdaishijian_set = EEPROM.readByte(56); //净水电磁阀关闭后的水满等待时间 56
-
-	zhishui_shjian_add = EEPROM.readByte(58); //存放制水总时间的起始地址，默认60
-
-	zhishuizongshijian = EEPROM.readULong(zhishui_shjian_add); //制水总时间   从60地址开始存放制水总时间,占4个字节
-
-	tiaoshi("制水总分钟：" + (String)zhishuizongshijian);
-
-	version = EEPROM.readULong(80); //bin版本
-
-	jingshuiximo_shichang = EEPROM.readByte(100);		//净水洗膜时长
-	ximo_shuiliu_jiance_cishu = EEPROM.readByte(102);   //洗膜水流检测次数 102
-	moci_ximo_maichong_biaozhun = EEPROM.readByte(104); //洗膜末次脉冲标准，低于此值认为气囊失效 104
-	guanbi = EEPROM.readBool(106);						//远程关闭设定
-}
-
-void edp_command_parse() //解析物联网返回的数据
-{
-	char *cmdid;
-	unsigned short cmdid_len;
-	char *cmd_req;
-	unsigned int cmd_req_len;
-	char cmd_resp[] = "ok";
-	unsigned int cmd_resp_len = 0;
-	EdpPacket *order_pkg;
-	while (edp_client.available())
-	{
-		edp_buffer[edp_buffer_index] = edp_client.read();
-		edp_buffer_index++;
-	}
-
-	RecvBuffer *recv_buf = NewBuffer();
-	WriteBytes(recv_buf, edp_buffer, edp_buffer_index);
-	edp_buffer_index = 0;
-	EdpPacket *pkg = GetEdpPacket(recv_buf);
-	DeleteBuffer(&recv_buf);
-	byte mtype = EdpPacketType(pkg);
-
-	switch (mtype)
-	{
-	case CONNRESP:
-		if (UnpackConnectResp(pkg) == 0)
-		{
-			edpConnected = true;
-			tiaoshi("已经连接到物联网");
-		}
-		break;
-	case PINGRESP:
-		if (UnpackPingResp(pkg) == 0)
-		{
-			hb_received = millis(); //心跳成功信号接收时间
-		}
-		break;
-	case CMDREQ://160打头
-		tiaoshi("接收到命令");
-
-		if (UnpackCmdReq(pkg, &cmdid, &cmdid_len, &cmd_req, &cmd_req_len) == 0)
-		{
-			Serial.println(cmdid);
-			Serial.println(cmd_req);
-			if (((String)cmd_req).startsWith("update") == true)
-			{
-				get_bin_version();
-				if (version_latest > version)
-				{
-					add_message("停机，远程更新");
-					tiaoshi("执行远程更新");
-					closeall();
-					ota();
-					add_update_message("update failed");
-					edp_first_connect();//重新连接物联网平台
-					to_send_update_message=true;				
-
-				}else
-				{  
-                    tiaoshi("已经是最新版本。");
-					add_update_message("already latest version");
-				}
-			}
-		}
-		cmd_resp_len = strlen(cmd_resp);
-		order_pkg = PacketCmdResp(cmdid, cmdid_len, cmd_resp, cmd_resp_len);
-		edp_packet_send(order_pkg->_data, order_pkg->_write_pos);
-		DeleteBuffer(&order_pkg);
-
-		free(cmdid);
-		free(cmd_req);
-
-		break;
-	default:
-		break;
-	}
-	DeleteBuffer(&pkg);
+	Serial.println("");
 }
 void edp_first_connect()
 {
 	if (WiFi.status() == WL_CONNECTED) //WiFi连接成功
 	{
-		if (wifi_client_connect() == true) //WiFi连接到网站成功
+		if (wifi_client_connect() == true) //WiFi连接到网站成�??
 		{
-			EdpPacket *send_pkg = PacketConnect1(device_id, apikey);
 
-			edp_packet_send(send_pkg->_data, send_pkg->_write_pos);
-			//edp_client.write(send_pkg->_data, send_pkg->_write_pos);
+			EdpPacket *send_pkg = PacketConnect1(device_id, apikey);
+			while (edp_client.available())
+			{
+				edp_client.read();
+			}
+			edp_client.write(send_pkg->_data, send_pkg->_write_pos);
+
 			DeleteBuffer(&send_pkg);
 		}
 	}
 }
-
+void edp_packet_send(unsigned char *buff, unsigned int size)
+{ //发送前清空客户端数据
+	while (edp_client.available())
+	{
+		edp_client.read();
+	}
+	
+	if (edpConnected)
+	{
+		edp_client.write(buff, size);
+	}
+	else{tiaoshi("没有连接到物联网平台");}
+}
 void edp_heartbeat()
 {
 	//ESP.wdtFeed();
@@ -336,121 +142,65 @@ void edp_heartbeat()
 	}
 }
 
-void edp_packet_send(unsigned char *buff, unsigned int size)
-{ //发送前清空客户端数据
-	while (edp_client.available())
-	{
-		edp_client.read();
-	}
+bool wifi_client_connect() //检查到物联网服务器连接状�?
+{
 	if (!edp_client.connected())
 	{
-		edp_client.connect(edp_server, edp_port);
-		Serial.print("连接到物联网：");
-		Serial.println((String)edp_server);
-	}
-	if (edp_client.connected())
-	{
-		edp_client.write(buff, size);
-	}
-}
-
-void edp_upload_int(const char *data_stream_id, int datapoint) //锟较达拷WiFi锟脚猴拷强锟斤拷锟角革拷值
-{
-	if (edpConnected == true)
-	{
-		EdpPacket *int_pkg = PacketSavedataInt(kTypeSimpleJsonWithoutTime, device_id, data_stream_id, datapoint, 0, 0);
-
-		edp_packet_send(int_pkg->_data, int_pkg->_write_pos);
-		DeleteBuffer(&int_pkg);
-	}
-}
-void edp_upload_string(const char *data_stream_id, const char *datapoint)
-{
-	if (edpConnected == true)
-	{
-		EdpPacket *string_pkg = PacketSavedataString(kTypeSimpleJsonWithoutTime, device_id, data_stream_id, datapoint, 0, 0);
-
-		edp_packet_send(string_pkg->_data, string_pkg->_write_pos);
-		DeleteBuffer(&string_pkg);
-	}
-}
-
-void get_bin_version()
-{
-	http_client.beginRequest();
-	http_client.get("/devices/" + (String)device_id + "/datastreams/bin_version");
-	http_client.sendHeader("api-key", apikey);
-	http_client.endRequest();
-	statusCode = http_client.responseStatusCode();
-	response = http_client.responseBody();
-	tiaoshi(response);
-	tiaoshi("状态码：" + (String)statusCode);
-	//tiaoshi(response);
-	if (statusCode == 200)
-	{
-		DeserializationError error = deserializeJson(doc, response);
-		if (error)
+		if (WiFi.status() == WL_CONNECTED)
 		{
-			Serial.print(F("deserializeJson() failed: "));
-			Serial.println(error.c_str());
-			return;
+			edp_client.connect(edp_server, edp_port);
+			Serial.print("连接到：");
+			Serial.println((String)edp_server);
+			delay(20);
 		}
 
-		JsonObject http_response = doc.as<JsonObject>();
-		//JsonObject& data=http_response["data"] ;
-		version_latest = http_response["data"]["current_value"].as<int>();
-		tiaoshi((String)version_latest);
-	String s="get latest version:"; s=s+(String)version_latest;
-		edp_upload_string("update", s.c_str());
-	}
-}
-// Utility to extract header value from headers
-String getHeaderValue(String header, String headerName)
-{
-	return header.substring(strlen(headerName.c_str()));
-}
-void xianshiping_sendorder2(String kongjian, String text) //?????????
-{
-	if (page == 0)
-	{
-		Serial2.print(kongjian + ".txt=\"" + text + "\"");
-		for (int i = 0; i < 3;)
-		{
-			Serial2.write(0xff);
-			i++;
+		if (edp_client.connected())
+		{ // ld.print("edp1succ",0);//04 edp服务�?? 连接  01:成功
+			return true;
+			//xianshiping_sendorder2("zhuangtai", "连接到物联网服务�?�??�常");
+			tiaoshi("连接到物联网主机正常");
+		}
+		else
+		{ //ld.print("edp1fail",0);//04 edp服务�?? 连接  01:成功
+			//xianshiping_sendorder2("zhuangtai", "连接到物联网服务器失�??");
+			tiaoshi("连接到物联网主机失败");
+			return false;
 		}
 	}
-	//delay(1500);
-}
-
-
-
-void rcvDebug(unsigned char *rcv, int len)
-{
-	int i;
-
-	Serial.print("edp接收的数据");
-	Serial.println(len, DEC);
-	for (i = 0; i < len; i++)
+	else //连接状�?
 	{
-		Serial.print(rcv[i], 16);
-		Serial.print(" ");
+		tiaoshi("连接到物联网主机正常");
+		return true;
 	}
-	Serial.println("");
+}
+void  add_update_message(String message)
+{	for (int i = 0; i < 10; i++)
+	{
+		if (update_message[i] == "")
+		{
+			update_message[i] = message;
+			break;
+		}
+	}
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
+void send_update_message()
+{
+	for (int i = 0; i < 10; i++)
+	{
+		if (update_message[i] != "")
+		{
+			edp_upload_string("update", update_message[i].c_str());
+			update_message[i] = "";
+			tiaoshi("发送更新信息：" + (String)(i + 1) + "次");
+		}
+		else
+		{
+			tiaoshi("发送信息为空");
+			break;
+		}
+	}
+}
 
 void ota()
 { // OTA Logic
@@ -473,7 +223,7 @@ void ota()
 		} //清空
 
 		// Get the contents of the bin file
-		update_client.print(String("GET /") + bin + " HTTP/1.1\r\n" +
+		update_client.print(String("GET /watchdog/") + bin + " HTTP/1.1\r\n" +
 							"Host: lyd50.vicp.io" + "\r\n" +
 							"cache-control: no-cache\r\n\r\n");
 
@@ -630,616 +380,364 @@ void ota()
 		}
 }
 
-
-void print_reset_reason(RESET_REASON reason)
+void edp_command_parse() //解析物联网返回的数据
 {
-	switch (reason)
+	char *cmdid;
+	unsigned short cmdid_len;
+	char *cmd_req;
+	unsigned int cmd_req_len;
+	char cmd_resp[] = "ok";
+	unsigned int cmd_resp_len = 0;
+	EdpPacket *order_pkg;
+	while (edp_client.available())
 	{
-	case 1:
-		Serial.println("POWERON_RESET");
-		reason1 = "Vbat power on reset";
-		break; /**<1,  Vbat power on reset*/
-	case 3:
-		Serial.println("SW_RESET");
-		reason1 = "Software reset digital core";
-		break; /**<3,  Software reset digital core*/
-	case 4:
-		Serial.println("OWDT_RESET");
-		reason1 = "Legacy watch dog reset digital core";
-		break; /**<4,  Legacy watch dog reset digital core*/
-	case 5:
-		Serial.println("DEEPSLEEP_RESET");
-		reason1 = "Deep Sleep reset digital core";
-		break; /**<5,  Deep Sleep reset digital core*/
-	case 6:
-		Serial.println("SDIO_RESET");
-		reason1 = "Reset by SLC module, reset digital core";
-		break; /**<6,  Reset by SLC module, reset digital core*/
-	case 7:
-		Serial.println("TG0WDT_SYS_RESET");
-		reason1 = "Timer Group0 Watch dog reset digital core";
-		break; /**<7,  Timer Group0 Watch dog reset digital core*/
-	case 8:
-		Serial.println("TG1WDT_SYS_RESET");
-		reason1 = "Timer Group1 Watch dog reset digital core";
-		break; /**<8,  Timer Group1 Watch dog reset digital core*/
-	case 9:
-		Serial.println("RTCWDT_SYS_RESET");
-		reason1 = "RTC Watch dog Reset digital core";
-		break; /**<9,  RTC Watch dog Reset digital core*/
-	case 10:
-		Serial.println("INTRUSION_RESET");
-		reason1 = "Instrusion tested to reset CPU";
-		break; /**<10, Instrusion tested to reset CPU*/
-	case 11:
-		Serial.println("TGWDT_CPU_RESET");
-		reason1 = " Time Group reset CPU";
-		break; /**<11, Time Group reset CPU*/
-	case 12:
-		Serial.println("SW_CPU_RESET");
-		reason1 = "Software reset CPU";
-		break; /**<12, Software reset CPU*/
-	case 13:
-		Serial.println("RTCWDT_CPU_RESET");
-		reason1 = "RTC Watch dog Reset CPU";
-		break; /**<13, RTC Watch dog Reset CPU*/
-	case 14:
-		Serial.println("EXT_CPU_RESET");
-		reason1 = "for APP CPU reseted by PRO CPU";
-		break; /**<14, for APP CPU, reseted by PRO CPU*/
-	case 15:
-		Serial.println("RTCWDT_BROWN_OUT_RESET");
-		reason1 = "Reset when the vdd voltage is not stable";
-		break; /**<15, Reset when the vdd voltage is not stable*/
-	case 16:
-		Serial.println("RTCWDT_RTC_RESET");
-		reason1 = "RTC Watch dog reset digital core and rtc module";
-		break; /**<16, RTC Watch dog reset digital core and rtc module*/
+		edp_buffer[edp_buffer_index] = edp_client.read();
+		edp_buffer_index++;
+	}
+
+	RecvBuffer *recv_buf = NewBuffer();
+	WriteBytes(recv_buf, edp_buffer, edp_buffer_index);
+	edp_buffer_index = 0;
+	EdpPacket *pkg = GetEdpPacket(recv_buf);
+	DeleteBuffer(&recv_buf);
+	byte mtype = EdpPacketType(pkg);
+
+	switch (mtype)
+	{
+	case CONNRESP:
+		if (UnpackConnectResp(pkg) == 0)
+		{
+			edpConnected = true;
+			tiaoshi("已经连接到物联网");
+		}
+		break;
+	case PINGRESP:
+		if (UnpackPingResp(pkg) == 0)
+		{
+			hb_received = millis(); //心跳成功信号接收时间
+		}
+		break;
+	case CMDREQ://160打头
+		tiaoshi("接收到命令");
+
+		if (UnpackCmdReq(pkg, &cmdid, &cmdid_len, &cmd_req, &cmd_req_len) == 0)
+		{
+			Serial.println(cmdid);
+			Serial.println(cmd_req);
+			if (((String)cmd_req).startsWith("update") == true)
+			{
+				get_bin_version();
+				if (version_latest > version)
+				{
+					
+					tiaoshi("执行远程更新");
+					
+					ota();
+					add_update_message("update failed");
+					edp_first_connect();//重新连接物联网平台
+					to_send_update_message=true;				
+
+				}else
+				{  
+                    tiaoshi("已经是最新版本。");
+					
+					add_update_message("已经是最新版本");
+					//send_update_message();
+					to_send_update_message=true;	
+				}
+			}
+		}
+		cmd_resp_len = strlen(cmd_resp);
+		order_pkg = PacketCmdResp(cmdid, cmdid_len, cmd_resp, cmd_resp_len);
+		edp_packet_send(order_pkg->_data, order_pkg->_write_pos);
+		DeleteBuffer(&order_pkg);
+
+		free(cmdid);
+		free(cmd_req);
+
+		break;
 	default:
-		Serial.println("NO_MEAN");
-		reason1 = "NO_MEAN";
+		break;
 	}
+	DeleteBuffer(&pkg);
 }
 
-
-void send_update_message()
-{ for (int i = 0; i < 10; i++)
-	{
-		if (update_message[i] != "")
-		{  edp_upload_string("update",update_message[i].c_str());
-           update_message[i]="";
-		}
-	}	
-}
-void send_order() //锟斤拷锟斤拷锟斤拷锟筋，锟截达拷锟斤拷示锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷锟斤拷?
+void edp_upload_int(const char *data_stream_id, int datapoint) //
 {
-	/*-----------------------------3锟斤拷页锟斤拷:锟斤拷锟斤拷锟斤拷锟斤拷---------------------------------*/
-	if (page == 3)
+	if (edpConnected == true)
 	{
+		EdpPacket *int_pkg = PacketSavedataInt(kTypeSimpleJsonWithoutTime, device_id, data_stream_id, datapoint, 0, 0);
 
-		if (set_once == true)
-		{
-
-			xianshiping_sendorder1("n0", chaolv_chongxi_maichong_dixian);
-			xianshiping_sendorder1("n1", loushui_maich_biaozhun);
-			xianshiping_sendorder1("n2", chxi_cishu);
-			xianshiping_sendorder1("n3", leiji_biaozhun);
-			set_once = false;
-		}
-	}
-	/*----------------------------4锟斤拷页锟斤拷:锟斤拷水锟斤拷锟斤拷-----------------------------*/
-	if (page == 4)
-	{
-		if (set_once == true)
-		{
-			xianshiping_sendorder1("n0", zhishuishijian_set);
-			xianshiping_sendorder1("n1", zhishui_maichong_biaozhun);
-			xianshiping_sendorder1("n2", chaoshi_cishu);
-			xianshiping_sendorder1("n3", shuimandengdaishijian_set);
-
-			set_once = false;
-		}
-	}
-	/*------------------------------5锟斤拷洗膜锟斤拷锟斤拷---------------------------------*/
-	if (page == 5)
-	{
-		if (set_once == true)
-		{
-			xianshiping_sendorder1("n0", jingshuiximo_shichang);
-			xianshiping_sendorder1("n1", ximo_shuiliu_jiance_cishu);
-			xianshiping_sendorder1("n2", moci_ximo_maichong_biaozhun);
-			// xianshiping_sendorder1("n3", dcf_chxi_shichang);
-			set_once = false;
-		}
-	}
-	/*-------------------------------11锟斤拷锟斤拷锟斤拷页锟芥处锟斤拷----------------------------------*/
-	if (page == 7)
-	{
-		if (set_once == true)
-		{
-
-			xianshiping_sendorder1("n0", brightness);
-			set_once = false;
-		}
+		edp_packet_send(int_pkg->_data, int_pkg->_write_pos);
+		DeleteBuffer(&int_pkg);
 	}
 }
-void serial_print(byte *rcv, int len)
+void edp_upload_string(const char *data_stream_id, const char *datapoint)
 {
-	int i;
-	Serial.print("jie shou:");
-	Serial.println(len, DEC);
-	for (i = 0; i < len; i++)
+	if (edpConnected == true)
 	{
-		Serial.print(rcv[i], 16);
-		Serial.print(" ");
-	}
-	Serial.println("");
-}
+		EdpPacket *string_pkg = PacketSavedataString(kTypeSimpleJsonWithoutTime, device_id, data_stream_id, datapoint, 0, 0);
 
-void Serial2_command_parse() //????????????
-{							 /*------------------------------????????????-------------------------------*/
-	if (buffer[0] == 0x0)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0x00");
-	}
-	if (buffer[0] == 0x02)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0x02");
-	}
-	if (buffer[0] == 0x03)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0x03");
-	}
-	if (buffer[0] == 0x04)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0x04");
-	}
-	if (buffer[0] == 0x05)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0x05");
-	}
-	if (buffer[0] == 0x11)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0x11");
-	}
-	if (buffer[0] == 0x12)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0x12");
-	}
-	//1A?????????????????閿熸枻锟??,?????????閿熸枻锟??????????
-	if (buffer[0] == 0x1A)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0x1A");
-	}
-	if (buffer[0] == 0x1B)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0X1B");
-	}
-	if (buffer[0] == 0x1C)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0X1C");
-	}
-	if (buffer[0] == 0x1D)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0X1D");
-	}
-	if (buffer[0] == 0x1E)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0X1E");
-	}
-	if (buffer[0] == 0x1F)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0X1F");
-	}
-	if (buffer[0] == 0x23)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0X23");
-	}
-	if (buffer[0] == 0x24)
-	{
-		Serial.print(order_sended);
-		Serial.println(": 0X24");
-	}
-
-	/*------------------------------获得页号-------------------------------*/
-	if (buffer[0] == 0x66) //
-	{
-		page = buffer[1]; //
-		tiaoshi("???" + (String)page);
-
-		Serial.print("page:");
-		Serial.println(page);
-		if (pre_page != page)
-		{
-			set_once = true; //鍥犱负椤靛澐涓濆潓锛屽厺璁镐紶閫濇暟锟??
-
-			pre_page = page;
-		}
-	}
-	/*---------------------------锟??0鍧烽〉锛屽埌2鍧凤拷?锟界疆椤甸潰:-------------------------------*/
-	if (page == 0)
-	{
-		if (buffer[0] == 0x90)
-		{
-			xsp_shezhi = true;
-			Serial2.print("page 2"); //到设置页
-			for (int i = 0; i < 3;)
-			{
-				Serial2.write(0xff);
-				i++;
-			}
-		}
-	}
-	/*----------------------------锟??2鍧烽〉-锟??0鍧凤拷?锟界疆椤甸潰:-------------------------------*/
-	if (page == 2)
-	{
-		if (buffer[0] == 0x98)
-		{
-			xsp_shezhi = false;
-			//xianshiping_sendorder2("zhuangtai", "");
-			edp_upload_string(hz[3], hz[28]);
-			Serial2.print("page 0"); //鍒帮拷?锟介〉
-			for (int i = 0; i < 3;)
-			{
-				Serial2.write(0xff);
-				i++;
-			}
-		}
-	}
-
-	/*-----------------------------3鍧疯秴婊わ拷?锟界疆椤甸潰:-------------------------------*/
-	if (page == 3)
-	{
-		if (buffer[0] == 0x90)
-		{
-			chaolv_chongxi_maichong_dixian = buffer[1];
-			EEPROM.writeByte(0, chaolv_chongxi_maichong_dixian); //0
-			eeprom_write = true;
-		}
-
-		if (buffer[0] == 0x91)
-		{
-			loushui_maich_biaozhun = buffer[1];
-			EEPROM.writeByte(2, loushui_maich_biaozhun); //
-			eeprom_write = true;
-		}
-
-		if (buffer[0] == 0x92)
-		{
-			chxi_cishu = buffer[1];
-			EEPROM.writeByte(4, chxi_cishu); //
-			eeprom_write = true;
-		}
-
-		if (buffer[0] == 0x93)
-		{
-			leiji_biaozhun = buffer[1]; //
-			EEPROM.writeByte(6, leiji_biaozhun);
-			eeprom_write = true;
-		}
-		if (buffer[0] == 0x98)
-		{
-			Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
-			for (int i = 0; i < 3;)
-			{
-				Serial2.write(0xff);
-				i++;
-			}
-		}
-	}
-	/*------------------------------4鍧烽〉锟??:璁剧疆鍒舵按鏈夊叧-----------------------------*/
-	if (page == 4)
-	{
-		if (buffer[0] == 0x90)
-		{
-			zhishuishijian_set = buffer[1];			  //
-			EEPROM.writeByte(50, zhishuishijian_set); //50
-
-			tiaoshi("??????????:" + (String)zhishuishijian_set);
-			eeprom_write = true;
-		}
-
-		if (buffer[0] == 0x91)
-		{
-			zhishui_maichong_biaozhun = buffer[1];
-			EEPROM.writeByte(52, zhishui_maichong_biaozhun); //52???
-			eeprom_write = true;
-		}
-
-		if (buffer[0] == 0x92)
-		{
-			chaoshi_cishu = buffer[1];
-			EEPROM.writeByte(54, chaoshi_cishu); //????54???
-			eeprom_write = true;
-		}
-		if (buffer[0] == 0x93)
-		{
-			shuimandengdaishijian_set = buffer[1]; //??43???
-			EEPROM.writeByte(56, shuimandengdaishijian_set);
-			eeprom_write = true;
-		}
-		if (buffer[0] == 0x98)
-		{
-			Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
-			for (int i = 0; i < 3;)
-			{
-				Serial2.write(0xff);
-				i++;
-			}
-		}
-	}
-	/*-----------------------------5鍧烽〉锟??:娲楄啘璁剧疆------------------------------*/
-	if (page == 5)
-	{
-		if (buffer[0] == 0x90) //
-		{
-			jingshuiximo_shichang = buffer[1];
-			EEPROM.writeByte(100, jingshuiximo_shichang); //
-			eeprom_write = true;
-		}
-
-		if (buffer[0] == 0x91) //
-		{
-			ximo_shuiliu_jiance_cishu = buffer[1];
-			EEPROM.writeByte(102, ximo_shuiliu_jiance_cishu); //
-			eeprom_write = true;
-		}
-		if (buffer[0] == 0x92) //
-		{
-			moci_ximo_maichong_biaozhun = buffer[1];
-			EEPROM.writeByte(104, moci_ximo_maichong_biaozhun); //????51???
-			eeprom_write = true;
-		}
-		if (buffer[0] == 0x98)
-		{
-			Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
-			for (int i = 0; i < 3;)
-			{
-				Serial2.write(0xff);
-				i++;
-			}
-		}
-	}
-	/*------------------------------13?????:wifi????-------------------------------*/
-
-	/*------------------------------7鍧蜂寒搴﹂〉闈?锟??锟界潌--------------------------------------*/
-	if (page == 7)
-	{
-		if (buffer[0] == 0x72)
-		{
-			//Serial.println("huo qu liang du");
-			brightness = buffer[1];
-			// p.putChar("brightness", brightness);
-		}
-		if (buffer[0] == 0x98)
-		{
-			Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
-			for (int i = 0; i < 3;)
-			{
-				Serial2.write(0xff);
-				i++;
-			}
-		}
-	}
-	/*-----------------------------9鍧烽〉锟??:娓╁害璁″簼锟??----------------------------*/
-	if (eeprom_write == true)
-	{
-		tiaoshi("?閿熸枻锟?????");
-		if (EEPROM.commit())
-		{
-			tiaoshi("???閿熸枻锟????");
-			eeprom_write = false;
-		}
-		else
-		{
-			tiaoshi("閿熸枻锟???????");
-		}
-		if (buffer[0] == 0x98)
-
-		{
-			Serial2.print("page 2"); //鍒帮拷?锟界疆锟??
-			for (int i = 0; i < 3;)
-			{
-				Serial2.write(0xff);
-				i++;
-			}
-		}
+		edp_packet_send(string_pkg->_data, string_pkg->_write_pos);
+		DeleteBuffer(&string_pkg);
 	}
 }
 
-
-void tiaoshi(String pingmuxianshi)
+void get_bin_version()
 {
-
-	if (tiaoshikg == true)
+	http_client.beginRequest();
+	http_client.get("/devices/" + (String)device_id + "/datastreams/bin_version");
+	http_client.sendHeader("api-key", apikey);
+	http_client.endRequest();
+	statusCode = http_client.responseStatusCode();
+	response = http_client.responseBody();
+	tiaoshi(response);
+	tiaoshi("状态码：" + (String)statusCode);
+	//tiaoshi(response);
+	if (statusCode == 200)
 	{
-
-		Serial.println(pingmuxianshi);
-	}
-}
-
-
-void tds_send_parse()
-{
-	if (tds_jiexi == false)
-	{
-		while (Serial1.available()) //发送前清空
+		DeserializationError error = deserializeJson(doc, response);
+		if (error)
 		{
-			Serial1.read();
-		}
-		for (int i = 0; i < 3;)
-		{
-			Serial1.write(0xfd);
-			i++;
-		}
-
-		tds_jiange = millis();
-		tds_buffer_index = 0;
-	}
-
-	while (Serial1.available())
-	{ //int byte_count =Serial1.available();
-
-		tds_buffer[tds_buffer_index] = Serial1.read();
-		if (tds_buffer[0] == 0xFD) //返回的确认信息
-		{
-			tds_jiexi = true;
-		}
-		else
-		{
-			while (Serial1.available()) //清空
-			{
-				Serial1.read();
-			}
+			Serial.print(F("deserializeJson() failed: "));
+			Serial.println(error.c_str());
 			return;
 		}
-		tds_buffer_index++;
-	}
 
-	if (tds_jiexi == true)
-	{
-		//rcvDebug(tds_buffer, tds_buffer_index);
-		if (tds_buffer[0] == 0xFD)
-		{
-			tds = tds_buffer[1] + tds_buffer[2] * 256;
-		}
-		edp_upload_int("tds", tds);
-		add_message("净水tds值：" + (String)tds);
-		tiaoshi("tds:" + (String)tds);
-		tds_jiexi = false;
+		JsonObject http_response = doc.as<JsonObject>();
+		//JsonObject& data=http_response["data"] ;
+		version_latest = http_response["data"]["current_value"].as<int>();
+		tiaoshi((String)version_latest);
+	String s="get latest version:"; s=s+(String)version_latest;
+		edp_upload_string("update", s.c_str());
 	}
 }
+// Utility to extract header value from headers
+String getHeaderValue(String header, String headerName)
+{
+	return header.substring(strlen(headerName.c_str()));
+}
+void check_wifi() //锟斤拷锟斤拷锟斤拷锟斤拷锟斤�??
+{
+	if (WiFi.status() != WL_CONNECTED)
+	{
+		WiFi.begin(ssid, password);
+		for (int i = 0; i < 25;) //一定延时
+		{
+			delay(500);
+			Serial.print(".");
+			i++;
+		}
+	}
+	if ((WiFi.status() != WL_CONNECTED)) //重新连接�??
+	{									 // ld.print("wifi fail",0);
+		//xianshiping_sendorder2("zhuangtai", "wifi重新连接失败");
 
+		wifi_disconnect_count++; //WiFi失败次数�??1
 
-void udp_sendok()
+		tiaoshi("wifi重新连接失败");
+	}
+	else						   //WiFi重新连接成功
+	{							   // ld.print("OIFI succ",0);//
+		wifi_disconnect_count = 0; //WiFi失败次数�??�??
+		tiaoshi("wifi连接正常");
+		//xianshiping_sendorder2("zhuangtai", "wifi连接正常");
+	}
+	if (wifi_disconnect_count > 10)
+	{
+		ESP.restart();
+	}
+}
+void sendok()
 {
 	IPAddress targetIp = IPAddress(192, 168, 2, 255); //?????
-	int targetPort = 7777;
+	int targetPort = 3333;
 	udp.beginPacket(targetIp, targetPort);
 	udp.print("ok");
 	udp.endPacket();
-	tiaoshi("发送一次ok");
+	edp_upload_int("发送ok", 20);
+	Serial.println("have sended ok");
+	send_time = millis();
 }
 
-void verbose_print_reset_reason(RESET_REASON reason)
+void eeprom_read()
 {
-	switch (reason)
+	if (!EEPROM.begin(200))
 	{
-	case 1:
-		Serial.println("Vbat power on reset");
-		reason2 = "Vbat power on reset";
-		break;
-	case 3:
-		Serial.println("Software reset digital core");
-		reason2 = "Software reset digital core";
-		break;
-	case 4:
-		Serial.println("Legacy watch dog reset digital core");
-		reason2 = "Legacy watch dog reset digital core";
-		break;
-	case 5:
-		Serial.println("Deep Sleep reset digital core");
-		reason2 = "Deep Sleep reset digital core";
-		break;
-	case 6:
-		Serial.println("Reset by SLC module, reset digital core");
-		reason2 = "Reset by SLC module, reset digital core";
-		break;
-	case 7:
-		Serial.println("Timer Group0 Watch dog reset digital core");
-		reason2 = "Timer Group0 Watch dog reset digital core";
-		break;
-	case 8:
-		Serial.println("Timer Group1 Watch dog reset digital core");
-		reason2 = "Timer Group1 Watch dog reset digital core";
-		break;
-	case 9:
-		Serial.println("RTC Watch dog Reset digital core");
-		reason2 = "RTC Watch dog Reset digital core";
-		break;
-	case 10:
-		Serial.println("Instrusion tested to reset CPU");
-		reason2 = "Instrusion tested to reset CPU";
-		break;
-	case 11:
-		Serial.println("Time Group reset CPU");
-		reason2 = "Time Group reset CPU";
-		break;
-	case 12:
-		Serial.println("Software reset CPU");
-		reason2 = "Software reset CPU";
-		break;
-	case 13:
-		Serial.println("RTC Watch dog Reset CPU");
-		reason2 = "RTC Watch dog Reset CPU";
-		break;
-	case 14:
-		Serial.println("for APP CPU reseted by PRO CPU");
-		reason2 = "for APP CPU, reseted by PRO CPU";
-		break;
-	case 15:
-		Serial.println("Reset when the vdd voltage is not stable");
-		reason2 = "Reset when the vdd voltage is not stable";
-		break;
-	case 16:
-		Serial.println("RTC Watch dog reset digital core and rtc module");
-		reason2 = "RTC Watch dog reset digital core and rtc module";
-		break;
-	default:
-		Serial.println("NO_MEAN");
-		reason2 = "NO_MEAN";
-	}
+		Serial.println("failed to initialise EEPROM");
+		delay(1000000);
+	}	
+
+	version = EEPROM.readULong(80); //bin版本					
 }
-bool wifi_client_connect() //检查到物联网服务器连接状态
+
+
+
+
+void setup()
 {
-	if (!edp_client.connected())
+	esp_task_wdt_deinit();
+	Serial.begin(9600);
+	pinMode(chongqi, OUTPUT);
+	digitalWrite(chongqi, LOW);
+	// [START] BEGIN WIFI
+	//WiFi.config(ip , gateway , subnet );
+	WiFi.begin(ssid, password);
+
+	if (WiFi.status() != WL_CONNECTED)
 	{
-		if (WiFi.status() == WL_CONNECTED)
+		for (int i = 0; i < 20;)
 		{
-			edp_client.connect(edp_server, edp_port);
-			Serial.print("连接到：");
-			Serial.println((String)edp_server);
+			delay(500);
+			Serial.print(".");
+			i++;
+		}
+	}
+	if (WiFi.status() == WL_CONNECTED)
+	{
+		Serial.println("");
+		Serial.print("Connected to ");
+		Serial.println(ssid);
+		Serial.print("IP address: ");
+		Serial.println(WiFi.localIP());
+		edp_first_connect();
+		udp.begin(WiFi.localIP(), 7777); // BEGIN LISTENING ON UDP PORT 7777.
+		sendok();						 //
+	}
+
+	eeprom_read();
+}
+
+void loop()
+{
+	if (send_reset == false) //运行一次,发送版本和启动信息
+	{
+		if (edpConnected == true)
+		{   edp_upload_int("version",version);
+			edp_upload_int("chongqi", 10);
+			delay(1000);
+			edp_upload_int("chongqi", 0);
+			send_reset = true;
+		}
+	}
+	/*---------------如果更新失败，向物联网平台发送失败信息-------------------*/
+	if (to_send_update_message == true)
+	{
+		for (int i = 0; i < 10; i++)
+		{
+			if (update_message[i] != "")
+			{
+				edp_upload_string("update", update_message[i].c_str());
+				update_message[i] = "";
+				tiaoshi("发送更新信息：" + (String)(i + 1) + "次");
+			}
+			else
+			{
+				tiaoshi("发送信息为空");
+				break;
+			}
 		}
 
-		if (edp_client.connected())
-		{ // ld.print("edp1succ",0);//04 edp服务器 连接  01:成功
-			return true;
-			xianshiping_sendorder2("zhuangtai", "连接到物联网服务器正常");
+		to_send_update_message = false;
+	}
+
+	/*------------------------------------wifi检查 到物联网服务器主机 定时心跳发出------------------------------------------*/
+
+	if (millis() - xintiao_jiange > 180000)
+	{
+		xintiao_jiange = millis();
+
+		check_wifi(); //wifi失联超过10次重�?�?
+		
+		wifi_client_connect();
+		//delay(1500); //为了显示�?否连接到edp服务�?
+		//tiaoshi("检�?WiFi�?否连接到物联网站");
+		if (WiFi.status() == WL_CONNECTED && edp_client.connected() == true)
+		{
+			if (edp_disconnect_count > 1)
+			{
+				edp_first_connect();
+			}
+			else
+			{
+				edp_heartbeat();	//�?以确定edp�?否连接状�?
+				hb_send = millis(); //心跳发送时�?
+				hb_confirm = true;
+				hb_confirm_jiange = millis();
+			}
+		}
+	}
+
+	/*------------------------------------edp心跳结果�?认，------------------------------------------------*/
+
+	if (hb_confirm == true && millis() - hb_confirm_jiange > 10000) //发送心跳后10�?
+	{
+		if (hb_received - hb_send > 0)
+		{
+			edpConnected = true;
+
+			//rcvDebug(edp_buffer, byte_count);
+			edp_disconnect_count = 0;
+			//edp_upload_string("heart beat", "received ok"); //
+			tiaoshi("EDP心跳成功接收返回数据，物联网正常");
 		}
 		else
-		{ //ld.print("edp1fail",0);//04 edp服务器 连接  01:成功
-			xianshiping_sendorder2("zhuangtai", "连接到物联网服务器失败");
-			return false;
+		{
+			edpConnected = false;
+			tiaoshi("物联网断网");
+		}
+		hb_confirm = false;
+	}
+
+	/*------------------------------------edp接收命令------------------------------------------------*/
+
+	//没有wifi，没有连接服务器，不用进�??
+	if (WiFi.status() == WL_CONNECTED && edp_client.connected() == true)
+	{
+		while (edp_client.available()) //有数�??
+		{
+			//tiaoshi("接收到edp数据");
+			edp_command_parse(); //解析返回数据
 		}
 	}
-	else //连接状态
+
+	if (millis() - send_time > 25000)
 	{
-		tiaoshi("连接到物联网服务器正常");
-		return true;
+		sendok();
 	}
-}
 
-void xianshiping_sendorder1(String kongjian, int value) //?????????
-{
-
-	Serial2.print(kongjian + ".val=" + value + "");
-	for (int i = 0; i < 3;)
+	if (udp.parsePacket())
 	{
-		Serial2.write(0xff);
-		i++;
-	};
+		// Serial.println("found data");
+		if (udp.available())
+		{
+			//Serial.println("available");
+			while (udp.available())
+			{
+				state = udp.readString();
+			}
+			//Serial.println(state);
+			if (state == "ok")
+			{
+				state = "";
+				Serial.println("received ok");
+				edp_upload_int("接收ok", 20);
+				edp_upload_int("重启对方", 0);
+				receive_time = millis();
+
+				// [END] AN UDP PACKET WAS RECEIVED
+			}
+		}
+	}
+
+	if ((millis() - receive_time) > 60000)
+	{
+		digitalWrite(chongqi, HIGH);
+		delay(4000);
+		digitalWrite(chongqi, LOW);
+		Serial.println("reset onetime");
+		edp_upload_int("接收ok", 0);
+		edp_upload_int("重启对方", 20);
+		receive_time = millis(); //加上重启等待
+	}
 }
