@@ -749,7 +749,11 @@ void loop()
 										//ld.print("jshudcf0", 0);
 										xianshiping_sendorder2("zhuangtai", "净水电磁阀关闭，等待洗膜压力桶水满");
 										tiaoshi("净水电磁阀关闭，等待洗膜压力桶水满");
-
+										delay(1000);
+                    xianshiping_sendorder2("zhuangtai", "储存洗膜水时水流脉冲最小值：" + (String)zhishui_maichong_biaozhun);
+											edp_upload_int(hz[10], count); //废水脉冲数
+											xianshiping_sendorder2("shuju", "制水时脉冲数：" + (String)count);
+											tiaoshi("制水时脉冲数：" + (String)count);
 										zhishui_xianshi_jiange = millis();
 									}
 
@@ -1003,5 +1007,4 @@ void loop()
 			guanji_xianshi_jiange = millis();
 		}
 	}
-}
 }
